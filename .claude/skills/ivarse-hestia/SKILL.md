@@ -153,6 +153,25 @@ Re-verify before relying on any of these; do not trust general Hestia knowledge.
 - php-fpm's port scanner in `v-change-web-domain-backend-tpl` starts at 9000 and
   is php-fpm-specific. Node needs its own allocator over a separate range.
 
+## Two standing hazards
+
+Both were found by review and both bite again in F4, F5 and F7.
+
+**Paths that root touches must be resolved first.** `APP_ROOT` is supplied by a
+panel user and then created and chowned by commands running as root. A symlink
+turns that into a privilege escalation — `ln -s /etc <app root>` followed by a
+root `chown -R $user` hands `/etc` to that user, demonstrated on the test box.
+`is_app_root_format_valid` resolves with `realpath -m` and requires the resolved
+path to stay inside the owning user's home. **Use `app_root_resolve` for every
+`mkdir`, `chown` and path written into config**, and prefer creating directories
+as the user rather than as root. Validating the resolved path and then using the
+raw one reintroduces the hole exactly.
+
+**`%` is a systemd specifier.** Commands may contain `%` because it is harmless
+as an argument, but a unit containing `ExecStart=npm start %n` expands it, and an
+unknown specifier makes the unit fail to start. Whoever writes a unit file
+escapes `%` as `%%`.
+
 ## Verification
 
 `ivarse/testbox.sh` runs a disposable **stock** Hestia in Docker:

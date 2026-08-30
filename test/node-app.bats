@@ -142,6 +142,47 @@ function write_app() {
 	assert_output "ivarse-python-$user-frontend"
 }
 
+@test "AppRegistry: A symlinked app root that escapes the home is refused" {
+	# Without resolution this is a root privilege escalation: APP_ROOT is
+	# created and chowned by commands running as root, so a symlink to /etc
+	# turns "chown -R $user $APP_ROOT" into handing /etc to that user.
+	mkdir -p "/home/$user/web/symsite"
+	ln -sfn /etc "/home/$user/web/symsite/app"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/web/symsite/app' '$user'"
+	assert_failure $E_FORBIDEN
+	assert_output --partial 'resolves outside'
+	rm -f "/home/$user/web/symsite/app"
+}
+
+@test "AppRegistry: A symlink pointing to another user is refused" {
+	mkdir -p "/home/$user/web/symsite"
+	ln -sfn /home/admin "/home/$user/web/symsite/app"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/web/symsite/app' '$user'"
+	assert_failure $E_FORBIDEN
+	rm -f "/home/$user/web/symsite/app"
+}
+
+@test "AppRegistry: A symlink staying inside the home is allowed" {
+	mkdir -p "/home/$user/web/symsite" "/home/$user/realapp"
+	ln -sfn "/home/$user/realapp" "/home/$user/web/symsite/app"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/web/symsite/app' '$user'"
+	assert_success
+	rm -f "/home/$user/web/symsite/app"
+}
+
+@test "AppRegistry: A path that does not exist yet still validates" {
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/web/notyet/app' '$user'"
+	assert_success
+}
+
+@test "AppRegistry: app_root_resolve returns the real path" {
+	mkdir -p "/home/$user/web/symsite" "/home/$user/realapp"
+	ln -sfn "/home/$user/realapp" "/home/$user/web/symsite/app"
+	run bash -c "source $HESTIA/func/app.sh; app_root_resolve '/home/$user/web/symsite/app'"
+	assert_output "/home/$user/realapp"
+	rm -f "/home/$user/web/symsite/app"
+}
+
 @test "AppRegistry: An app name is not usable as a search pattern" {
 	# Unvalidated, a name like '.*' matched every record at once and the parser
 	# merged them into a single malformed object while exiting 0.
