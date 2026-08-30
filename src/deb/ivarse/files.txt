@@ -27,3 +27,10 @@ bin/v-list-node-apps
 
 # Node.js release key refresh
 bin/v-update-sys-nodejs-keys
+
+# Application lifecycle
+bin/v-add-node-app
+bin/v-delete-node-app
+bin/v-change-node-app-port
+bin/v-change-node-app-runtime
+bin/v-change-node-app-command

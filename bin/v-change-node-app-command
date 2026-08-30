@@ -1,0 +1,70 @@
+#!/bin/bash
+# info: change a node application command
+# options: USER APP TYPE COMMAND
+#
+# example: v-change-node-app-command admin frontend start 'node server.js'
+# example: v-change-node-app-command admin frontend build 'npm run build:prod'
+#
+# This function changes the start or build command of a Node.js application.
+# The build command may be empty; the start command may not, since it is what
+# would be supervised.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+user=$1
+app=$2
+cmd_type=$3
+command_value=$4
+
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/node.sh
+source $HESTIA/func/node.sh
+# shellcheck source=/usr/local/hestia/func/app.sh
+source $HESTIA/func/app.sh
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'USER APP TYPE COMMAND'
+is_format_valid 'user'
+is_object_valid 'user' 'USER' "$user"
+is_app_name_format_valid "$app"
+is_type_valid 'start build' "$cmd_type"
+check_hestia_demo_mode
+
+if [ "$cmd_type" = 'start' ] && [ -z "$command_value" ]; then
+	check_result "$E_INVALID" "the start command may not be empty"
+fi
+if [ -n "$command_value" ]; then
+	is_app_command_format_valid "$command_value" "$cmd_type command"
+fi
+
+if ! app_exists "$user" "$app"; then
+	check_result "$E_NOTEXIST" "application $app doesn't exist"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+if [ "$cmd_type" = 'start' ]; then
+	update_object_value 'app' 'NAME' "$app" '$START_COMMAND' "$command_value"
+else
+	update_object_value 'app' 'NAME' "$app" '$BUILD_COMMAND' "$command_value"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+$BIN/v-log-action "$user" "Info" "Node" "Changed $cmd_type command of Node.js application $app."
+log_event "$OK" "$ARGUMENTS"
+
+exit

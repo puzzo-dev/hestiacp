@@ -311,6 +311,9 @@ function write_app() {
 
 @test "NodejsKeys: A refreshed keyring takes precedence over the bundled one" {
 	local_kr="$HESTIA/data/ivarse/nodejs/release-keys.asc"
+	# A refresh left by another run would make the bundled-copy assertion below
+	# fail for reasons unrelated to what is being tested.
+	rm -f "$local_kr"
 	run bash -c "source /etc/hestiacp/hestia.conf; source $HESTIA/func/main.sh; source $HESTIA/func/node.sh; echo \$NODE_RELEASE_KEYRING"
 	assert_output --partial "install/common/nodejs/release-keys.asc"
 
