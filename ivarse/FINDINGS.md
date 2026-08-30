@@ -32,6 +32,8 @@ Status is one of:
 | 13 | `mktemp` result used unchecked. | Medium. On failure the download would have been written to `/`. | `4b7c6f5` |
 | 14 | Resolved path compared against an **unresolved** home. | Medium availability. Rejected every legitimate app root where the home sits behind a symlink (`/home -> /srv/home`). | `de44adb` — both sides resolved |
 | 15 | `xz-utils` undeclared. | Low. `Priority: standard`, so absent on a minimal image. | Declared in the add-on's `Depends` |
+| 17 | Residual TOCTOU: the app root could still be swapped after validation, because every directory a user can write to is one where they can delete a name and re-point it. | **Critical, root escalation** (the remaining half of #4). | `F2c` — app roots moved to `/home/<user>/.ivarse/apps/<app>`, whose parents are root-owned and not user-writable, so the swap is impossible rather than merely mitigated |
+| 18 | The bundled Node release keyring was a build-time snapshot, so a release signed by a newly added Node team member failed until a package update. | Medium availability. Runtime installs would stop working with no way to recover except waiting. | `F2c` — `v-update-sys-nodejs-keys` refreshes from the fingerprints in the `nodejs/node` README into a location outside the package, which takes precedence over the bundled copy |
 | 16 | `[ -f x ] && install` at top level under `set -e`. | Low. Works only because bash exempts the left side of `&&`; one edit from a silent early exit. | `0d3c503` |
 
 ---
@@ -46,13 +48,13 @@ Status is one of:
 
 ## ACCEPTED
 
-| # | Finding | Reason |
-|---|---|---|
-| A1 | Residual TOCTOU: a symlink can still be swapped after `app_root_assert_safe` returns. | Not closable in shell. Mitigated structurally: `assert_safe` **echoes the resolved path** so callers work with a concrete path rather than one traversing an attacker-controlled symlink, and the rule is that no root operation is performed on it. F4/F5/F7 are bound to `app_root_create` / `app_root_assert_safe` rather than to a rule someone has to remember. |
-| A2 | The bundled Node release keyring is a point-in-time snapshot. | A release signed by a newly added Node team member fails until the keyring is refreshed. The error names the cause and `NODE_RELEASE_KEYRING` overrides it without waiting for a package update. Failing closed is the correct behaviour. |
-| A3 | An explicit `apt-get install --allow-downgrades hestia=<version>` can still install a stock Hestia over an add-on box. | Only relevant to the abandoned fork model. Under add-on packaging the add-on survives that anyway, which is the whole point. |
+None.
 
----
+## Not applicable
+
+| Finding | Why it is not a vulnerability |
+|---|---|
+| An explicit `apt-get install --allow-downgrades hestia=<version>` could install a stock Hestia over the box. | This only mattered under the abandoned fork model, where the two packages were the same package. Under add-on packaging they are different packages, so a stock Hestia does not displace the add-on. Verified: downgrading Hestia to 1.10.3 left all add-on files present and working (`add-on files: 9 -> 9`). |
 
 ## Open
 

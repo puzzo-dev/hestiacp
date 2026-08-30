@@ -167,9 +167,9 @@ is a client of it.
 - **Decided — `func/app.sh` is separate from `func/node.sh`.** The registry is
   the runtime-agnostic layer; `node.sh` stays Node-specific. Phase 2 reuses
   `app.sh` untouched, which is the test of whether the abstraction was right.
-- **Decided — `APP_ROOT` defaults to `/home/<user>/web/<domain>/app`** as
-  `research.txt` suggests, but is a stored, configurable field so an
-  application can live elsewhere. It is validated to resolve inside the owning
+- **`APP_ROOT` location — superseded by F2c.** It is not freely configurable:
+  it must sit under `/home/<user>/.ivarse/apps/`, because anywhere else in the
+  home is user-writable and therefore swappable. It is validated to resolve inside the owning
   user's home, with `..` rejected: it becomes a systemd `WorkingDirectory` and
   the target of a build run as that user, so a path escaping the home directory
   would cross Hestia's isolation boundary.
@@ -260,6 +260,40 @@ is a client of it.
   leaves `/etc` untouched; a legitimate root is created owned by the user;
   `assert_safe` refuses an escaping path and a non-directory. ✅ **37/37** on a
   clean box, `nodejs` suite **22/22**.
+
+### F2c · Close the last three accepted findings
+- **Status:** IN PROGRESS — on `feat/f2c-close-accepted`
+- **Depends on:** F2b
+- **Packaging:** adds-only ✅
+- **Why:** three findings had been marked *accepted* rather than fixed. Two were
+  real and closable; the third turned out not to be a vulnerability at all.
+- **Residual TOCTOU — now structurally impossible.** F2b closed the race at the
+  moment of creation but the root stayed swappable afterwards, because every
+  directory a user can write to is one where they can delete a name and
+  re-point it. Application roots moved to `/home/<user>/.ivarse/apps/<app>`:
+  ```
+  /home/<user>          root:root 751   Hestia's own layout
+  /home/<user>/.ivarse  root:root 755   user cannot write
+  .../apps              root:root 755   so <app> cannot be deleted or re-pointed
+  .../apps/<app>        user:user 755   the user owns the contents
+  ```
+  ✅ verified — the user cannot `rmdir`, `mv` or symlink at the root or its
+  parent, and can still write inside it.
+- **Keyring snapshot — now refreshable.** `v-update-sys-nodejs-keys` fetches the
+  current fingerprints from the `nodejs/node` README into
+  `$HESTIA/data/ivarse/nodejs/release-keys.asc`, outside the package so it
+  survives upgrades, and takes precedence over the bundled copy. A newly added
+  Node signer is one command, not a package update.
+- **`--allow-downgrades` — not a vulnerability.** It applied to the abandoned
+  fork model. Verified: downgrading Hestia to 1.10.3 left all add-on files
+  present and working.
+- **Consequence for F4:** `APP_ROOT` is no longer freely configurable. It must
+  be under the managed base, because anywhere else in the home is swappable.
+  `app_default_root <user> <app>` gives the path.
+- **Files:** `func/app.sh`, `func/node.sh`, `bin/v-update-sys-nodejs-keys`,
+  `test/node-app.bats`
+- **Acceptance:** the app root cannot be swapped by its owner; a refreshed
+  keyring is preferred and still verifies a real runtime. ✅ **42/42**.
 
 ### F3 · Port allocator
 - **Status:** TODO

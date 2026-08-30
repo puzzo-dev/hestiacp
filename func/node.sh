@@ -14,10 +14,27 @@ NODE_ROOT="/opt/ivarse/node"
 NODE_DIST_MIRROR="${NODE_DIST_MIRROR:-https://nodejs.org/dist}"
 
 # Node.js release signing keys. Every release's SHASUMS256.txt is verified
-# against this keyring before its checksums are trusted. Overridable so an
-# administrator can supply a refreshed keyring when Node adds a release signer,
-# without waiting for a package update.
-NODE_RELEASE_KEYRING="${NODE_RELEASE_KEYRING:-$HESTIA_COMMON_DIR/nodejs/release-keys.asc}"
+# against this keyring before its checksums are trusted.
+#
+# Two locations, in order of preference:
+#
+#   1. a keyring refreshed by v-update-sys-nodejs-keys, kept outside the
+#      package's own files so it survives a package upgrade
+#   2. the keyring shipped with the package
+#
+# The bundled copy is a snapshot of the Node.js release team at build time, and
+# Node rotates that team. Preferring the refreshed copy means a newly added
+# signer is handled by running one command rather than by waiting for a package
+# update. NODE_RELEASE_KEYRING may still be set explicitly to override both.
+NODE_RELEASE_KEYRING_LOCAL="${NODE_RELEASE_KEYRING_LOCAL:-$HESTIA/data/ivarse/nodejs/release-keys.asc}"
+
+if [ -z "$NODE_RELEASE_KEYRING" ]; then
+	if [ -s "$NODE_RELEASE_KEYRING_LOCAL" ]; then
+		NODE_RELEASE_KEYRING="$NODE_RELEASE_KEYRING_LOCAL"
+	else
+		NODE_RELEASE_KEYRING="$HESTIA_COMMON_DIR/nodejs/release-keys.asc"
+	fi
+fi
 
 # Prefix for the generated systemd units, and where they are written
 NODE_SERVICE_PREFIX="ivarse-node"
