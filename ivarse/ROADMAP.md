@@ -328,12 +328,15 @@ is a client of it.
 - **Files:** `func/app.sh`, `test/node-ports.bats`
 - **Acceptance:** allocating N applications yields N distinct ports; a port held
   by an unrelated process is skipped; a deleted application's port is reusable.
-  ✅ **15/15**.
+  ✅ **17/17**, including two concurrent allocations receiving distinct ports.
 - **Fixed in review:** the scan required whitespace before `PORT=`, so a field
   at the start of a line was missed entirely — the same port handed to two
-  applications. And scanning spawned two processes per candidate, which took
-  **5372ms** on a nearly full range; building the taken-set once brought that to
-  **67ms**.
+  applications. Scanning spawned two processes per candidate, taking **5372ms**
+  on a nearly full range; building the taken-set once brought that to **67ms**.
+  The lock was documented as required but not enforced, so a caller could race
+  silently — allocation now refuses without it. And `ss` was optional, which
+  would have quietly reduced this to a registry-only check; it is now required
+  and `iproute2` is a declared dependency.
 
 ### F4 · Application CRUD
 - **Status:** TODO
