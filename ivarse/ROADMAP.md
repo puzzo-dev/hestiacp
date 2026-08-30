@@ -187,7 +187,7 @@ is a client of it.
   compared with refusing them.
 
 ### F2a · Resolve the application root before trusting it
-- **Status:** IN PROGRESS — on `feat/f2a-approot-resolution`, PR not yet opened
+- **Status:** DONE — merged (`71a58d6`, `ec33e0e`, `de44adb`)
 - **Depends on:** F2
 - **Packaging:** adds-only ✅
 - **Why:** not hardening — a **root privilege escalation**, demonstrated on the
@@ -208,9 +208,20 @@ is a client of it.
   systemd. Resolving here and then using the raw value elsewhere reintroduces
   the identical hole. This applies to F4, F5 and F7.
 - **Files:** `func/app.sh`, `test/node-app.bats`
+- **Also fixed in review:** `APP_ROOT` accepted a newline, which is systemd unit
+  injection — it becomes `WorkingDirectory=`, and an appended `User=root` wins
+  because systemd honours the last one. Now restricted to `[A-Za-z0-9/._-]`,
+  which removes the class rather than enumerating what to block. Separately, the
+  resolved path was compared against an *unresolved* home, which rejected every
+  legitimate root on a host where the home sits behind a symlink
+  (`/home -> /srv/home`). Both sides are resolved now.
+- **Not closable here — TOCTOU.** The symlink can be swapped between validation
+  and use, which is why F4/F5/F7 must re-resolve at the point of use *and*
+  create the directory as the user rather than as root.
 - **Acceptance:** a symlinked root escaping the home is refused; one pointing at
   another user is refused; one staying inside the home is allowed; a path that
-  does not exist yet still validates.
+  does not exist yet still validates. ✅ **27/27** on a clean box, and the
+  add-on survived a real `1.10.4 -> 1.10.7` Hestia upgrade.
 
 ### F3 · Port allocator
 - **Status:** TODO
