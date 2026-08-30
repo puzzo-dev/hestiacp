@@ -33,6 +33,8 @@ version="$(awk '/^Version:/ {print $2; exit}' "$PKG_DIR/control")"
 
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
+# mktemp creates 0700; the package root must be world-readable
+chmod 755 "$staging"
 
 mkdir -p "$staging/DEBIAN" "$staging/$HESTIA_PREFIX"
 cp "$PKG_DIR/control" "$staging/DEBIAN/control"

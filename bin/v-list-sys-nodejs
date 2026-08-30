@@ -1,0 +1,101 @@
+#!/bin/bash
+# info: list installed nodejs runtimes
+# options: [FORMAT]
+#
+# example: v-list-sys-nodejs json
+#
+# This function for obtaining the list of Node.js runtimes managed by Hestia.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+format=${1-shell}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/node.sh
+source $HESTIA/func/node.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# JSON list function
+json_list() {
+	local i=1
+	local objects
+	objects=$(echo "$majors" | wc -w)
+	echo '{'
+	for major in $majors; do
+		echo -n '    "'$major'": {
+        "VERSION": "'$(node_runtime_version "$major")'",
+        "BINARY": "'$(node_runtime_bin "$major")'",
+        "ROOT": "'$NODE_ROOT/$major'",
+        "DEFAULT": "'$(node_runtime_is_default "$major")'"
+    }'
+		if [ "$i" -lt "$objects" ]; then
+			echo ','
+		else
+			echo
+		fi
+		((++i))
+	done
+	echo '}'
+}
+
+# SHELL list function
+shell_list() {
+	echo "MAJOR   VERSION      DEFAULT  BINARY"
+	echo "-----   -------      -------  ------"
+	for major in $majors; do
+		printf "%-7s %-12s %-8s %s\n" \
+			"$major" \
+			"$(node_runtime_version "$major")" \
+			"$(node_runtime_is_default "$major")" \
+			"$(node_runtime_bin "$major")"
+	done
+}
+
+# PLAIN list function
+plain_list() {
+	for major in $majors; do
+		echo -e "$major\t$(node_runtime_version "$major")\t$(node_runtime_is_default "$major")\t$(node_runtime_bin "$major")"
+	done
+}
+
+# CSV list function
+csv_list() {
+	echo "MAJOR,VERSION,DEFAULT,BINARY"
+	for major in $majors; do
+		echo "$major,$(node_runtime_version "$major"),$(node_runtime_is_default "$major"),$(node_runtime_bin "$major")"
+	done
+}
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+is_format_valid 'format'
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+majors=$(node_runtime_list)
+
+# Listing data
+case $format in
+	json) json_list ;;
+	plain) plain_list ;;
+	csv) csv_list ;;
+	shell) shell_list ;;
+esac
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+exit

@@ -1,0 +1,55 @@
+#!/bin/bash
+# info: change the default nodejs runtime
+# options: MAJOR
+#
+# example: v-change-sys-nodejs-default 22
+#
+# This function selects which installed Node.js runtime applications use when
+# they do not pin a version of their own.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+node_major=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/node.sh
+source $HESTIA/func/node.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'MAJOR'
+is_node_major_format_valid "$node_major"
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if ! node_runtime_exists "$node_major"; then
+	check_result "$E_NOTEXIST" "Node.js $node_major is not installed"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+ln -sfn "$node_major" "$NODE_ROOT/default"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "system" "Info" "Plugins" "Default Node.js runtime set to $node_major."
+log_event "$OK" "$ARGUMENTS"
+
+exit

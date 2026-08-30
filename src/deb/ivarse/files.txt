@@ -9,3 +9,10 @@
 #   dpkg -S /usr/local/hestia/<path>
 #
 # Directories are shipped recursively. Blank lines and # comments are ignored.
+
+# Node.js runtime management
+bin/v-add-sys-nodejs
+bin/v-delete-sys-nodejs
+bin/v-list-sys-nodejs
+bin/v-change-sys-nodejs-default
+func/node.sh
