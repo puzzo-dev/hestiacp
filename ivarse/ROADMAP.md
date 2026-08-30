@@ -10,6 +10,10 @@ channels with no merge, no rebuild and no procedure. See `ivarse/UPSTREAM.md`.
 
 **Status values:** `TODO` · `IN PROGRESS` · `IN REVIEW` · `DONE` · `BLOCKED` · `DEFERRED`
 
+`DONE` means merged into `main`, and cites the merge commits so the claim can be
+checked against `git log` rather than taken on trust. Update the status in the
+same change that merges the work, not later.
+
 **Phase 1 goal (the only goal right now):** get `ivarseltd.com` and the Ofada
 Girl site off Cloudflare Workers and back onto the Namecheap VPS, served as
 Node apps managed by Hestia, still talking to the containerised multi-tenant
@@ -56,7 +60,7 @@ is a client of it.
 ## Phase 1 — Node hosting v1
 
 ### F0 · Add-on packaging + test box
-- **Status:** IN REVIEW
+- **Status:** DONE — merged (`945d9cd`, `0d3c503`, `8f25b1e`)
 - **Depends on:** —
 - **Packaging:** adds-only ✅ — touches zero upstream files
 - **Why first:** nothing can be verified until the work can be built and
@@ -94,7 +98,7 @@ is a client of it.
   F11 only; F1–F9 are unaffected. Keep the count at zero as long as possible.
 
 ### F1 · Node runtime install + version management
-- **Status:** IN REVIEW — PR #3, stacked on #2
+- **Status:** DONE — merged (`fbf6307`, `4b7c6f5`)
 - **Depends on:** F0
 - **Packaging:** adds-only ✅
 - **Decided:** official nodejs.org tarballs into `/opt/ivarse/node/<major>`,
@@ -123,8 +127,32 @@ is a client of it.
     download to `/`.
   - `xz-utils` was undeclared. It is `Priority: standard`, not required.
 
+### F1a · Verify the nodejs.org release signature
+- **Status:** DONE — merged (`dfc6527`)
+- **Depends on:** F1
+- **Packaging:** adds-only ✅
+- **Why it exists:** checksum-alone was not a bar. A mirror can serve a tarball,
+  a `SHASUMS256.txt` whose checksum genuinely matches it, and a valid signature
+  over that manifest. F1 only asked whether the tarball matched the checksum
+  beside it, which such a mirror answers correctly. Demonstrated with a hostile
+  mirror whose `node` printed `PWNED`: F1's code installed it **and made it the
+  default runtime**.
+- **Fix:** `SHASUMS256.txt` is verified against the Node.js release keys before
+  any checksum from it is trusted. Keys bundled at
+  `install/common/nodejs/release-keys.asc` (all 9 from the `nodejs/node`
+  README). `gpgv` against a fixed keyring, not `gpg`, so verification cannot be
+  influenced by or write to any keyring on the host.
+- **Files:** `install/common/nodejs/release-keys.asc`, `func/node.sh`,
+  `bin/v-add-sys-nodejs`, `test/nodejs.bats`, `src/deb/ivarse/control`
+- **Acceptance:** an invalid, absent or untrusted signature is refused.
+  ✅ verified, including the attacker-signed mirror, on a real installation.
+- **Known limitation:** the bundled keyring is a point-in-time snapshot of
+  Node's release team. A release signed by a newly added member fails until the
+  keyring is refreshed; the error names the cause and `NODE_RELEASE_KEYRING`
+  overrides it.
+
 ### F2 · Application registry + data model
-- **Status:** IN REVIEW — PR #7
+- **Status:** DONE — merged (`66bacfb`, `2d3a9be`)
 - **Depends on:** F0
 - **Packaging:** adds-only ✅
 - **Scope:** the runtime-agnostic `Application` object, plus the two listing
@@ -159,7 +187,7 @@ is a client of it.
   compared with refusing them.
 
 ### F2a · Resolve the application root before trusting it
-- **Status:** IN REVIEW — PR pending
+- **Status:** IN PROGRESS — on `feat/f2a-approot-resolution`, PR not yet opened
 - **Depends on:** F2
 - **Packaging:** adds-only ✅
 - **Why:** not hardening — a **root privilege escalation**, demonstrated on the
