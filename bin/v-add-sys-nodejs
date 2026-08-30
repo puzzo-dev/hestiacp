@@ -1,0 +1,132 @@
+#!/bin/bash
+# info: install a nodejs runtime
+# options: MAJOR [DEFAULT]
+#
+# example: v-add-sys-nodejs 22
+# example: v-add-sys-nodejs 24 yes
+#
+# This function installs a Node.js runtime from the official nodejs.org
+# distribution into /opt/ivarse/node/MAJOR, leaving any other installed major
+# version untouched. Applications pin a major version, so several may coexist.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+node_major=$1
+default=${2-no}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/node.sh
+source $HESTIA/func/node.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# Remove the staging directory on any exit path
+cleanup_staging() {
+	[ -n "$staging" ] && [ -d "$staging" ] && rm -rf "$staging"
+}
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'MAJOR [DEFAULT]'
+is_node_major_format_valid "$node_major"
+is_boolean_format_valid "$default" 'default'
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if node_runtime_exists "$node_major"; then
+	check_result "$E_EXISTS" "Node.js $node_major is already installed"
+fi
+
+if ! node_runtime_arch > /dev/null; then
+	check_result "$E_INVALID" "unsupported architecture :: $(uname -m)"
+fi
+
+for cmd in curl tar xz sha256sum; do
+	if [ -z "$(command -v "$cmd")" ]; then
+		check_result "$E_NOTEXIST" "required command not found :: $cmd"
+	fi
+done
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Resolving the latest release of this major version upstream
+if ! node_runtime_resolve "$node_major"; then
+	check_result "$E_CONNECT" "unable to resolve Node.js $node_major from $NODE_DIST_MIRROR"
+fi
+
+# Staged inside the install root rather than /tmp so that the final move is a
+# same-filesystem rename, and so that a ~230MB unpacked runtime is written to
+# disk instead of being buffered in a tmpfs-backed /tmp.
+mkdir -p "$NODE_ROOT"
+chmod 755 "$NODE_ROOT"
+staging=$(mktemp -d "$NODE_ROOT/.staging.XXXXXXXX")
+trap cleanup_staging EXIT
+
+# Downloading the release tarball
+if ! curl -fsSL --max-time 900 \
+	-o "$staging/$node_tarball" \
+	"$NODE_DIST_MIRROR/v$node_full_version/$node_tarball"; then
+	check_result "$E_CONNECT" "unable to download $node_tarball"
+fi
+
+# Verifying the checksum published alongside the release. A tarball that does
+# not match is never extracted.
+if ! (cd "$staging" && echo "$node_sha256  $node_tarball" | sha256sum -c --status -); then
+	check_result "$E_INVALID" "checksum mismatch for $node_tarball"
+fi
+
+# Unpacking into the staging directory first, so a failed extraction cannot
+# leave a half-installed runtime behind
+if ! tar -xJf "$staging/$node_tarball" -C "$staging"; then
+	check_result "$E_PARSING" "unable to unpack $node_tarball"
+fi
+
+unpacked="$staging/${node_tarball%.tar.xz}"
+if [ ! -x "$unpacked/bin/node" ]; then
+	check_result "$E_NOTEXIST" "unpacked archive does not contain bin/node"
+fi
+
+echo "$node_full_version" > "$unpacked/.ivarse-version"
+
+# Moving the finished runtime into place. Same filesystem, so this is an atomic
+# rename: the runtime either appears complete or not at all.
+if ! mv "$unpacked" "$NODE_ROOT/$node_major"; then
+	check_result "$E_DISK" "unable to install runtime into $NODE_ROOT/$node_major"
+fi
+
+chown -R root:root "$NODE_ROOT/$node_major"
+find "$NODE_ROOT/$node_major" -type d -exec chmod 755 {} +
+
+# Enabling corepack so applications may select pnpm or yarn without a global
+# install. Not fatal if unavailable: npm alone is enough to run an application.
+if [ -x "$NODE_ROOT/$node_major/bin/corepack" ]; then
+	"$NODE_ROOT/$node_major/bin/corepack" enable \
+		--install-directory "$NODE_ROOT/$node_major/bin" > /dev/null 2>&1
+fi
+
+# The first runtime installed becomes the default
+if [ "$default" = "yes" ] || [ -z "$(node_runtime_default)" ]; then
+	ln -sfn "$node_major" "$NODE_ROOT/default"
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "system" "Info" "Plugins" "Node.js $node_full_version installed (major: $node_major)."
+log_event "$OK" "$ARGUMENTS"
+
+exit
