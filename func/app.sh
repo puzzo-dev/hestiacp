@@ -259,16 +259,34 @@ app_default_root() {
 # mkdir without -p on the leaf is deliberate. It fails if anything already
 # exists at that name, including a symlink, rather than silently accepting it.
 app_root_create() {
-	local user="$1" path="$2" base
+	local user="$1" path="$2" base component
 
 	app_env_required
 	is_app_root_format_valid "$path" "$user"
 
 	base="$(app_root_base "$user")"
 
-	mkdir -p -- "$base"
-	chown root:root "$base" "$HOMEDIR/$user/.ivarse"
-	chmod 755 "$base" "$HOMEDIR/$user/.ivarse"
+	# Build the parent chain one component at a time, refusing any component
+	# that is already a symlink. mkdir -p and chown both follow a symlink, so
+	# a link at .ivarse would have this creating and chowning directories
+	# wherever it pointed - measured: it created /etc/apps.
+	#
+	# /home/<user> is root-owned and not user-writable, so an unprivileged user
+	# cannot plant such a link today. This does not depend on that remaining
+	# true: a restored backup or another tool could create one, and this is the
+	# component every other guarantee rests on.
+	for component in "$HOMEDIR/$user/.ivarse" "$base"; do
+		if [ -L "$component" ]; then
+			check_result "$E_FORBIDEN" "app root base component is a symlink :: $component"
+		fi
+		if [ ! -d "$component" ]; then
+			if ! mkdir -- "$component" 2> /dev/null; then
+				check_result "$E_DISK" "unable to create $component"
+			fi
+		fi
+		chown root:root "$component"
+		chmod 755 "$component"
+	done
 
 	if [ -L "$path" ]; then
 		check_result "$E_EXISTS" "app root exists and is a symlink :: $path"

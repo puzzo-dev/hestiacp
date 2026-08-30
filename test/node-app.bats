@@ -338,6 +338,23 @@ function write_app() {
 	rm -f "$HESTIA/data/ivarse/nodejs/release-keys.asc"
 }
 
+@test "AppRegistry: A symlink in the base chain is refused, not followed" {
+	# mkdir -p and chown both follow a symlink. A link at .ivarse previously
+	# had this creating and chowning directories wherever it pointed - it
+	# created /etc/apps. Not reachable by an unprivileged user, since
+	# /home/<user> is root-owned, but this is what every other guarantee here
+	# rests on.
+	rm -rf "/home/$user/.ivarse" /srv/symtarget
+	mkdir -p /srv/symtarget
+	ln -sfn /srv/symtarget "/home/$user/.ivarse"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_create '$user' '/home/$user/.ivarse/apps/x'"
+	assert_failure $E_FORBIDEN
+	assert_output --partial 'is a symlink'
+	assert_dir_not_exist "/srv/symtarget/apps"
+	rm -f "/home/$user/.ivarse"
+	rm -rf /srv/symtarget
+}
+
 @test "AppRegistry: An app name is not usable as a search pattern" {
 	# Unvalidated, a name like '.*' matched every record at once and the parser
 	# merged them into a single malformed object while exiting 0.
