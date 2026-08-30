@@ -118,15 +118,14 @@ function write_app() {
 	assert_success
 }
 
-@test "AppRegistry: An app root outside the user's home is refused" {
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; HOMEDIR=/home; is_app_root_format_valid '/etc' '$user'"
-	assert_failure $E_FORBIDEN
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; HOMEDIR=/home; is_app_root_format_valid '/home/otheruser/web/x/app' '$user'"
-	assert_failure $E_FORBIDEN
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; HOMEDIR=/home; is_app_root_format_valid '/home/$user/web/x/app/../../../etc' '$user'"
+@test "AppRegistry: An app root outside the managed base is refused" {
+	base="/home/$user/.ivarse/apps"
+	for bad in "/etc" "/home/admin/.ivarse/apps/x" "/home/$user/web/d/private/app" "/home/$user/elsewhere"; do
+		run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid \"\$1\" '$user'" _ "$bad"
+		assert_failure $E_FORBIDEN
+	done
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '$base/../../escape' '$user'"
 	assert_failure $E_INVALID
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; HOMEDIR=/home; is_app_root_format_valid '/home/$user/web/x/app' '$user'"
-	assert_success
 }
 
 @test "AppRegistry: Shell metacharacters are refused in commands" {
@@ -163,121 +162,107 @@ function write_app() {
 }
 
 @test "AppRegistry: Ordinary app roots are still accepted" {
-	for good in "app" "my-app_2" "web/site.com/app" "a.b-c_d/app"; do
-		run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid \"\$1\" '$user'" _ "/home/$user/$good"
+	for good in "app" "my-app_2" "site.com" "a.b-c_d"; do
+		run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid \"\$1\" '$user'" _ "/home/$user/.ivarse/apps/$good"
 		assert_success
 	done
 }
 
-@test "AppRegistry: A symlinked app root that escapes the home is refused" {
-	# Without resolution this is a root privilege escalation: APP_ROOT is
-	# created and chowned by commands running as root, so a symlink to /etc
-	# turns "chown -R $user $APP_ROOT" into handing /etc to that user.
-	mkdir -p "/home/$user/web/symsite"
-	ln -sfn /etc "/home/$user/web/symsite/app"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/web/symsite/app' '$user'"
+@test "AppRegistry: A symlinked app root that escapes the base is refused" {
+	mkdir -p "/home/$user/.ivarse/apps"
+	ln -sfn /etc "/home/$user/.ivarse/apps/esc"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/.ivarse/apps/esc' '$user'"
 	assert_failure $E_FORBIDEN
 	assert_output --partial 'resolves outside'
-	rm -f "/home/$user/web/symsite/app"
+	rm -f "/home/$user/.ivarse/apps/esc"
 }
 
 @test "AppRegistry: A symlink pointing to another user is refused" {
-	mkdir -p "/home/$user/web/symsite"
-	ln -sfn /home/admin "/home/$user/web/symsite/app"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/web/symsite/app' '$user'"
+	mkdir -p "/home/$user/.ivarse/apps"
+	ln -sfn /home/admin "/home/$user/.ivarse/apps/other"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/.ivarse/apps/other' '$user'"
 	assert_failure $E_FORBIDEN
-	rm -f "/home/$user/web/symsite/app"
+	rm -f "/home/$user/.ivarse/apps/other"
 }
 
-@test "AppRegistry: A symlink staying inside the home is allowed" {
-	mkdir -p "/home/$user/web/symsite" "/home/$user/realapp"
-	ln -sfn "/home/$user/realapp" "/home/$user/web/symsite/app"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/web/symsite/app' '$user'"
+@test "AppRegistry: A symlink staying inside the base is allowed" {
+	mkdir -p "/home/$user/.ivarse/apps/real"
+	ln -sfn "/home/$user/.ivarse/apps/real" "/home/$user/.ivarse/apps/alias"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/.ivarse/apps/alias' '$user'"
 	assert_success
-	rm -f "/home/$user/web/symsite/app"
+	rm -f "/home/$user/.ivarse/apps/alias"
 }
 
 @test "AppRegistry: A path that does not exist yet still validates" {
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/web/notyet/app' '$user'"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/.ivarse/apps/notyet' '$user'"
 	assert_success
 }
 
 @test "AppRegistry: app_root_resolve returns the real path" {
-	mkdir -p "/home/$user/web/symsite" "/home/$user/realapp"
-	ln -sfn "/home/$user/realapp" "/home/$user/web/symsite/app"
-	run bash -c "source $HESTIA/func/app.sh; app_root_resolve '/home/$user/web/symsite/app'"
-	assert_output "/home/$user/realapp"
-	rm -f "/home/$user/web/symsite/app"
+	mkdir -p "/home/$user/.ivarse/apps/real2"
+	ln -sfn "/home/$user/.ivarse/apps/real2" "/home/$user/.ivarse/apps/alias2"
+	run bash -c "source $HESTIA/func/app.sh; app_root_resolve '/home/$user/.ivarse/apps/alias2'"
+	assert_output "/home/$user/.ivarse/apps/real2"
+	rm -f "/home/$user/.ivarse/apps/alias2"
 }
 
 @test "AppRegistry: A symlinked home directory does not cause false rejections" {
-	# Homes on mounted storage are often reached through a symlink, e.g.
-	# /home -> /srv/home. Comparing a resolved path against an unresolved home
-	# would reject every legitimate application root on such a host.
-	mkdir -p "/srv/althome/$user/web/x"
+	# Homes on mounted storage are often reached through a symlink.
+	mkdir -p "/srv/althome/$user/.ivarse/apps/x"
 	ln -sfn /srv/althome /altohome
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; HOMEDIR=/altohome; is_app_root_format_valid '/altohome/$user/web/x/app' '$user'"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; HOMEDIR=/altohome; is_app_root_format_valid '/altohome/$user/.ivarse/apps/x' '$user'"
 	assert_success
 	rm -f /altohome
 	rm -rf /srv/althome
 }
 
-@test "AppRegistry: Creating an app root needs a real web domain" {
-	run v-add-web-domain "$user" "$domain"
+@test "AppRegistry: The app root base is root-owned and not user-writable" {
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_create '$user' \"\$(app_default_root '$user' frontend)\""
 	assert_success
-	assert_dir_exist "/home/$user/web/$domain/private"
+	base="/home/$user/.ivarse/apps"
+	run stat -c "%U:%G %a" "$base"
+	assert_output "root:root 755"
+	# The user must not be able to delete a name here and re-point it: that is
+	# the swap the whole layout exists to prevent.
+	run runuser -u "$user" -- rmdir "$base/frontend"
+	assert_failure
+	run runuser -u "$user" -- ln -s /etc "$base/evil"
+	assert_failure
 }
 
-@test "AppRegistry: The default app root lives under private/" {
-	# Not a sibling of public_html: Hestia makes the domain directory 551, so
-	# the user cannot create there and root doing it is the escalation vector.
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_default_root '$user' '$domain' 'frontend'"
-	assert_output "/home/$user/web/$domain/private/frontend"
+@test "AppRegistry: The app root itself is owned by the user" {
+	run stat -c "%U:%G" "/home/$user/.ivarse/apps/frontend"
+	assert_output "$user:$user"
 }
 
-@test "AppRegistry: Creating an app root works and is owned by the user" {
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_create '$user' '/home/$user/web/$domain/private/frontend'"
+@test "AppRegistry: The user can write inside their app root" {
+	run runuser -u "$user" -- touch "/home/$user/.ivarse/apps/frontend/index.js"
 	assert_success
-	assert_dir_exist "/home/$user/web/$domain/private/frontend"
-	run stat -c %U "/home/$user/web/$domain/private/frontend"
-	assert_output "$user"
+	assert_file_exist "/home/$user/.ivarse/apps/frontend/index.js"
 }
 
-@test "AppRegistry: Creating an app root does not follow a swapped symlink" {
-	# The race: validation passes on a real directory, the user swaps it for a
-	# symlink, and a root operation follows it. Every chown variant follows
-	# such a symlink, -h included, so the fix is to drop privileges rather
-	# than to pick better flags.
-	runuser -u "$user" -- ln -s /etc "/home/$user/web/$domain/private/evil"
+@test "AppRegistry: The default app root is under the managed base" {
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_default_root '$user' 'frontend'"
+	assert_output "/home/$user/.ivarse/apps/frontend"
+}
+
+@test "AppRegistry: A root anywhere else in the home is refused" {
+	# web/<domain>/private is user-writable, so a name there can be swapped.
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/web/x/private/app' '$user'"
+	assert_failure $E_FORBIDEN
+	assert_output --partial 'must be under'
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '/home/$user/anywhere' '$user'"
+	assert_failure $E_FORBIDEN
+}
+
+@test "AppRegistry: An existing symlink at the app root is refused" {
+	mkdir -p "/home/$user/.ivarse/apps"
+	ln -sfn /etc "/home/$user/.ivarse/apps/linked"
 	etc_before="$(stat -c %U /etc)"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_create '$user' '/home/$user/web/$domain/private/evil/x'"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_create '$user' '/home/$user/.ivarse/apps/linked'"
 	assert_failure
 	assert_equal "$(stat -c %U /etc)" "$etc_before"
-	rm -f "/home/$user/web/$domain/private/evil"
-}
-
-@test "AppRegistry: assert_safe echoes the resolved path for callers to use" {
-	runuser -u "$user" -- mkdir -p "/home/$user/web/$domain/private/real"
-	runuser -u "$user" -- ln -s "/home/$user/web/$domain/private/real" "/home/$user/web/$domain/private/link"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' '/home/$user/web/$domain/private/link'"
-	assert_success
-	assert_output "/home/$user/web/$domain/private/real"
-	rm -f "/home/$user/web/$domain/private/link"
-}
-
-@test "AppRegistry: assert_safe refuses a path that escapes at use time" {
-	runuser -u "$user" -- ln -s /etc "/home/$user/web/$domain/private/escape"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' '/home/$user/web/$domain/private/escape'"
-	assert_failure $E_FORBIDEN
-	rm -f "/home/$user/web/$domain/private/escape"
-}
-
-@test "AppRegistry: assert_safe refuses a path that is not a directory" {
-	runuser -u "$user" -- touch "/home/$user/web/$domain/private/afile"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' '/home/$user/web/$domain/private/afile'"
-	assert_failure $E_NOTEXIST
-	assert_output --partial 'not a directory'
-	rm -f "/home/$user/web/$domain/private/afile"
+	rm -f "/home/$user/.ivarse/apps/linked"
 }
 
 @test "AppRegistry: Creating an app root validates before it creates" {
@@ -302,6 +287,55 @@ function write_app() {
 	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; HOMEDIR=''; app_root_assert_safe '$user' '/home/$user'"
 	assert_failure $E_INVALID
 	assert_output --partial 'HOMEDIR is not set'
+}
+
+@test "AppRegistry: assert_safe echoes the resolved path" {
+	runuser -u "$user" -- mkdir -p "/home/$user/.ivarse/apps/frontend/sub"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' '/home/$user/.ivarse/apps/frontend'"
+	assert_success
+	assert_output "/home/$user/.ivarse/apps/frontend"
+}
+
+@test "AppRegistry: assert_safe refuses a path outside the managed base" {
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' '/home/$user/web'"
+	assert_failure $E_FORBIDEN
+}
+
+@test "AppRegistry: assert_safe refuses a path that is not a directory" {
+	touch "/home/$user/.ivarse/apps/afile"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' '/home/$user/.ivarse/apps/afile'"
+	assert_failure $E_NOTEXIST
+	assert_output --partial 'not a directory'
+	rm -f "/home/$user/.ivarse/apps/afile"
+}
+
+@test "NodejsKeys: A refreshed keyring takes precedence over the bundled one" {
+	local_kr="$HESTIA/data/ivarse/nodejs/release-keys.asc"
+	run bash -c "source /etc/hestiacp/hestia.conf; source $HESTIA/func/main.sh; source $HESTIA/func/node.sh; echo \$NODE_RELEASE_KEYRING"
+	assert_output --partial "install/common/nodejs/release-keys.asc"
+
+	mkdir -p "$(dirname "$local_kr")"
+	cp "$HESTIA/install/common/nodejs/release-keys.asc" "$local_kr"
+	run bash -c "source /etc/hestiacp/hestia.conf; source $HESTIA/func/main.sh; source $HESTIA/func/node.sh; echo \$NODE_RELEASE_KEYRING"
+	assert_output "$local_kr"
+	rm -f "$local_kr"
+}
+
+@test "NodejsKeys: Refreshing the keyring produces a parseable keyring" {
+	run v-update-sys-nodejs-keys
+	assert_success
+	assert_output --partial "Refreshed"
+	assert_file_exist "$HESTIA/data/ivarse/nodejs/release-keys.asc"
+	run bash -c "gpg --dearmor < $HESTIA/data/ivarse/nodejs/release-keys.asc | wc -c"
+	[ "$output" -gt 0 ]
+}
+
+@test "NodejsKeys: A runtime still verifies against the refreshed keyring" {
+	run v-add-sys-nodejs 22
+	assert_success
+	run v-delete-sys-nodejs 22
+	assert_success
+	rm -f "$HESTIA/data/ivarse/nodejs/release-keys.asc"
 }
 
 @test "AppRegistry: An app name is not usable as a search pattern" {

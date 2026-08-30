@@ -1,0 +1,101 @@
+#!/bin/bash
+# info: refresh the nodejs release signing keys
+# options: NONE
+#
+# example: v-update-sys-nodejs-keys
+#
+# The keyring shipped with this package is a snapshot of the Node.js release
+# team taken when the package was built. Node rotates that team, so a release
+# signed by a newly added member fails verification until the keyring catches
+# up. This refreshes it from the fingerprints published in the nodejs/node
+# README, without waiting for a package update.
+#
+# The refreshed keyring is written outside the package's own files, so it
+# survives a package upgrade and takes precedence over the bundled copy.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/node.sh
+source $HESTIA/func/node.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+readme="https://raw.githubusercontent.com/nodejs/node/main/README.md"
+keyserver="https://keys.openpgp.org/vks/v1/by-fingerprint"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+for cmd in curl gpg; do
+	if [ -z "$(command -v "$cmd")" ]; then
+		check_result "$E_NOTEXIST" "required command not found :: $cmd"
+	fi
+done
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# The authoritative list of who signs Node.js releases
+fingerprints=$(curl -fsSL --max-time 60 "$readme" 2> /dev/null \
+	| grep -oE 'recv-keys [A-F0-9]{40}' | awk '{print $2}' | sort -u)
+
+if [ -z "$fingerprints" ]; then
+	check_result "$E_CONNECT" "unable to read the Node.js release key list"
+fi
+
+staging=$(mktemp -d)
+trap 'rm -rf "$staging"' EXIT
+
+{
+	echo "# Node.js release signing keys"
+	echo "# Refreshed by v-update-sys-nodejs-keys on $(date -u +%Y-%m-%d)"
+	echo "# Source: $readme"
+	echo "#"
+} > "$staging/keys.asc"
+
+imported=0
+for fpr in $fingerprints; do
+	if curl -fsSL --max-time 30 "$keyserver/$fpr" >> "$staging/keys.asc" 2> /dev/null; then
+		imported=$((imported + 1))
+	fi
+done
+
+if [ "$imported" -eq 0 ]; then
+	check_result "$E_CONNECT" "no keys could be fetched"
+fi
+
+# A keyring that gpg cannot parse would silently fail every verification
+# afterwards, so prove it parses before putting it in place.
+if ! gpg --dearmor < "$staging/keys.asc" > "$staging/keys.gpg" 2> /dev/null \
+	|| [ ! -s "$staging/keys.gpg" ]; then
+	check_result "$E_PARSING" "refreshed keyring is not valid"
+fi
+
+mkdir -p "$(dirname "$NODE_RELEASE_KEYRING_LOCAL")"
+mv -f "$staging/keys.asc" "$NODE_RELEASE_KEYRING_LOCAL"
+chown root:root "$NODE_RELEASE_KEYRING_LOCAL"
+chmod 644 "$NODE_RELEASE_KEYRING_LOCAL"
+
+echo "Refreshed $imported Node.js release keys into $NODE_RELEASE_KEYRING_LOCAL"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "system" "Info" "Plugins" "Node.js release keyring refreshed ($imported keys)."
+log_event "$OK" "$ARGUMENTS"
+
+exit

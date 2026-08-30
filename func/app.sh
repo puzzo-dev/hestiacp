@@ -152,6 +152,8 @@ is_app_port_format_valid() {
 # and then using the raw value elsewhere reintroduces the same hole.
 is_app_root_format_valid() {
 	local path="$1" user="$2" home resolved resolved_home
+
+	app_env_required
 	case "$path" in
 		/*) ;;
 		*) check_result "$E_INVALID" "app root must be an absolute path :: $path" ;;
@@ -179,16 +181,19 @@ is_app_root_format_valid() {
 		check_result "$E_INVALID" "app root may only contain letters, digits and / . _ - :: $path"
 	fi
 
-	home="$HOMEDIR/$user"
+	# Containment is against the managed base rather than the home directory.
+	# Everywhere else in the home is user-writable, so a name there can be
+	# deleted and replaced with a symlink; under the base it cannot.
+	home="$(app_root_base "$user")"
 	case "$path" in
 		"$home"/*) ;;
-		*) check_result "$E_FORBIDEN" "app root must be inside $home :: $path" ;;
+		*) check_result "$E_FORBIDEN" "app root must be under $home :: $path" ;;
 	esac
 
-	# Compare resolved against resolved. The home directory itself may sit
-	# behind a symlink - homes on mounted storage are often /home -> /srv/home -
-	# and comparing a resolved path against an unresolved home would reject
-	# every legitimate application root on such a host.
+	# Compare resolved against resolved. The home may itself sit behind a
+	# symlink - homes on mounted storage are often /home -> /srv/home - and
+	# comparing a resolved path against an unresolved base would reject every
+	# legitimate application root on such a host.
 	resolved="$(app_root_resolve "$path")"
 	resolved_home="$(app_root_resolve "$home")"
 	if [ -z "$resolved" ] || [ -z "$resolved_home" ]; then
@@ -219,55 +224,65 @@ app_env_required() {
 	fi
 }
 
-# Create an application root.
+# Where application roots live.
 #
-# Delegates to Hestia's own v-add-fs-directory, which resolves the destination,
-# refuses anything outside the user's home, and creates it through setpriv as
-# that user. No root privilege is ever applied through a path the user
-# controls, which is what actually closes the race:
+# NOT under web/<domain>/. Every directory a user can write to is a directory
+# where they can delete a name and replace it with a symlink, which is the
+# race that F2b closed only for the moment of creation. Putting the root
+# somewhere with no user-writable component above it removes the race entirely
+# rather than mitigating it:
 #
-#   is_app_root_format_valid .../app   # passes, it is a real directory
-#   rmdir .../app && ln -s /etc .../app
-#   chown -R alice .../app             # as root -> /etc now belongs to alice
+#   /home/<user>            root:root 751   Hestia's own layout, user cannot write
+#   /home/<user>/.ivarse    root:root 755   ours, user cannot write
+#   .../apps                root:root 755   user cannot write, so <app> cannot
+#                                           be deleted and re-pointed
+#   .../apps/<app>          user:user 755   the user owns the contents
 #
-# Measured on the test box, every chown variant follows that symlink - -h,
-# -P and --no-dereference included - so choosing better flags is not a
-# mitigation. Dropping privileges is, because the kernel then decides, and
-# anything reachable that way the user could already reach unaided.
-#
-# v-add-fs-directory also permits /tmp; app_root_assert_safe afterwards
-# restricts this to the user's home.
-app_root_create() {
-	local user="$1" path="$2"
-
-	app_env_required
-
-	# Validate before creating, not after. v-add-fs-directory also permits
-	# /tmp, so checking only afterwards leaves a stray directory behind on a
-	# rejected call, and it would mean this primitive trusted its caller to
-	# have validated. It enforces its own contract instead.
-	is_app_root_format_valid "$path" "$user"
-
-	if ! "$BIN/v-add-fs-directory" "$user" "$path" > /dev/null 2>&1; then
-		check_result "$E_FORBIDEN" "unable to create app root as $user :: $path"
-	fi
-
-	app_root_assert_safe "$user" "$path" > /dev/null
+# The user writes freely inside the application root - that is where their
+# code lives - but cannot replace the root itself. Anything they symlink
+# inside it is their own business, reachable with their own privileges.
+app_root_base() {
+	echo "$HOMEDIR/$1/.ivarse/apps"
 }
 
-# The default application root.
-#
-# Not a sibling of public_html, despite that being the obvious place. Hestia
-# creates the domain directory as 551, and although the user owns it they
-# cannot write to it, so the directory would have to be created by root - which
-# is the escalation above. public_html is writable but is the document root,
-# where application source has no business being.
-#
-# private/ is user-writable, inside Hestia's own per-domain structure, and is
-# not served by the web server.
+# The default, and only permitted, application root.
 app_default_root() {
-	local user="$1" domain="$2" app="$3"
-	echo "$HOMEDIR/$user/web/$domain/private/$app"
+	echo "$(app_root_base "$1")/$2"
+}
+
+# Create an application root.
+#
+# The parent chain is root-owned and not user-writable, so creating it as root
+# is safe: no name along the path can have been pre-empted by a symlink. The
+# leaf is then handed to the user so their application can write into it.
+#
+# mkdir without -p on the leaf is deliberate. It fails if anything already
+# exists at that name, including a symlink, rather than silently accepting it.
+app_root_create() {
+	local user="$1" path="$2" base
+
+	app_env_required
+	is_app_root_format_valid "$path" "$user"
+
+	base="$(app_root_base "$user")"
+
+	mkdir -p -- "$base"
+	chown root:root "$base" "$HOMEDIR/$user/.ivarse"
+	chmod 755 "$base" "$HOMEDIR/$user/.ivarse"
+
+	if [ -L "$path" ]; then
+		check_result "$E_EXISTS" "app root exists and is a symlink :: $path"
+	fi
+	if [ ! -d "$path" ]; then
+		if ! mkdir -- "$path" 2> /dev/null; then
+			check_result "$E_EXISTS" "unable to create app root :: $path"
+		fi
+	fi
+
+	chown "$user:$user" "$path"
+	chmod 755 "$path"
+
+	app_root_assert_safe "$user" "$path" > /dev/null
 }
 
 # Re-check an application root at the moment it is used, and echo the resolved
@@ -282,14 +297,16 @@ app_root_assert_safe() {
 	app_env_required
 	home="$HOMEDIR/$user"
 	resolved="$(app_root_resolve "$path")"
-	resolved_home="$(app_root_resolve "$home")"
+	resolved_home="$(app_root_resolve "$(app_root_base "$user")")"
 
 	if [ -z "$resolved" ] || [ -z "$resolved_home" ]; then
 		check_result "$E_INVALID" "unable to resolve app root :: $path"
 	fi
+	# Containment is against the managed base, not merely the home directory.
+	# Anywhere else in the home is user-writable, and therefore swappable.
 	case "$resolved" in
 		"$resolved_home"/*) ;;
-		*) check_result "$E_FORBIDEN" "app root resolves outside $home :: $path -> $resolved" ;;
+		*) check_result "$E_FORBIDEN" "app root must be under $(app_root_base "$user") :: $path -> $resolved" ;;
 	esac
 	if [ ! -d "$resolved" ]; then
 		check_result "$E_NOTEXIST" "app root is not a directory :: $resolved"

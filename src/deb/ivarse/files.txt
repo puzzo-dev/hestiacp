@@ -24,3 +24,6 @@ install/common/nodejs
 func/app.sh
 bin/v-list-node-app
 bin/v-list-node-apps
+
+# Node.js release key refresh
+bin/v-update-sys-nodejs-keys
