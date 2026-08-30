@@ -46,14 +46,14 @@ function write_app() {
 }
 
 @test "Ports: First allocation returns the bottom of the range" {
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; get_next_app_port"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_port_lock_acquire; get_next_app_port"
 	assert_success
 	assert_output "$APP_PORT_MIN"
 }
 
 @test "Ports: A claimed port is skipped" {
 	write_app "a" "$APP_PORT_MIN" "$user" "$conf"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; get_next_app_port"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_port_lock_acquire; get_next_app_port"
 	assert_output "$((APP_PORT_MIN + 1))"
 }
 
@@ -61,13 +61,13 @@ function write_app() {
 	# Ports belong to the host, not to a user. A per-user scan would hand the
 	# same port to two different users.
 	write_app "b" "$((APP_PORT_MIN + 1))" "$user2" "$conf2"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; get_next_app_port"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_port_lock_acquire; get_next_app_port"
 	assert_output "$((APP_PORT_MIN + 2))"
 }
 
 @test "Ports: A gap left by a deleted application is reused" {
 	sed -i "/NAME='a'/d" "$conf"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; get_next_app_port"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_port_lock_acquire; get_next_app_port"
 	assert_output "$APP_PORT_MIN"
 }
 
@@ -78,7 +78,7 @@ function write_app() {
 	nc -l -s 127.0.0.1 -p "$port" > /dev/null 2>&1 &
 	listener=$!
 	sleep 1
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; get_next_app_port"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_port_lock_acquire; get_next_app_port"
 	kill "$listener" > /dev/null 2>&1 || true
 	refute_output "$port"
 }
@@ -115,7 +115,7 @@ function write_app() {
 	# user is correctly counted and would move the expected answer.
 	: > "$conf2"
 	printf "PORT='%s' NAME='edge'\n" "$APP_PORT_MIN" > "$conf"
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; get_next_app_port"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_port_lock_acquire; get_next_app_port"
 	assert_output "$((APP_PORT_MIN + 1))"
 	: > "$conf"
 }
@@ -125,12 +125,29 @@ function write_app() {
 	: > "$conf2"
 	python3 -c "open('$conf','w').write('\n'.join(\"NAME='a%d' PORT='%d'\" % (i,i) for i in range($APP_PORT_MIN, $APP_PORT_MAX)) + '\n')"
 	start=$(date +%s%N)
-	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; get_next_app_port"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_port_lock_acquire; get_next_app_port"
 	elapsed=$(( ($(date +%s%N) - start) / 1000000 ))
 	assert_success
 	assert_output "$APP_PORT_MAX"
 	[ "$elapsed" -lt 1000 ]
 	: > "$conf"
+}
+
+@test "Ports: Allocation without the lock is refused" {
+	# The lock is not advisory: without it two concurrent creations are handed
+	# the same port, which then fails intermittently and looks like an
+	# application bug.
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; get_next_app_port"
+	assert_failure $E_INVALID
+	assert_output --partial 'requires the lock'
+}
+
+@test "Ports: The listening check refuses to run without ss" {
+	# Silently skipping it would reduce this to a registry-only check and hand
+	# out ports already in use.
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; PATH=/nonexistent; app_ports_listening"
+	assert_failure $E_NOTEXIST
+	assert_output --partial 'iproute2'
 }
 
 @test "Ports: Reject a port outside the range" {
@@ -145,6 +162,7 @@ function write_app() {
 @test "Ports: Exhaustion is reported, not silently wrong" {
 	run bash -c "
 		source $HESTIA/func/main.sh; source $HESTIA/func/app.sh
+		app_port_lock_acquire
 		APP_PORT_MIN=31000; APP_PORT_MAX=31000
 		printf \"NAME='z' PORT='31000'\n\" >> $conf
 		get_next_app_port

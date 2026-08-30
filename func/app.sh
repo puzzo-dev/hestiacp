@@ -159,8 +159,11 @@ app_ports_claimed() {
 # application would leave that application unable to start with a message
 # pointing at the wrong thing.
 app_ports_listening() {
+	# Returning nothing when ss is absent would quietly reduce this to a
+	# registry-only check and hand out ports that are already in use. If the
+	# check cannot run, say so rather than answer as though it had.
 	if [ -z "$(command -v ss)" ]; then
-		return 0
+		check_result "$E_NOTEXIST" "ss is required to check listening ports (install iproute2)"
 	fi
 	ss -ltnH 2> /dev/null | awk '{print $4}' | sed -n 's/.*:\([0-9]\{1,5\}\)$/\1/p'
 }
@@ -194,6 +197,15 @@ app_ports_taken_into() {
 get_next_app_port() {
 	local port
 	local -A taken=()
+
+	# The lock is not advisory. Choosing a port without it means a concurrent
+	# creation can be handed the same one, because neither has written its
+	# record yet - and two applications on one port fail intermittently, in a
+	# way that looks like an application bug. Refuse rather than let a caller
+	# forget.
+	if [ -z "$APP_PORT_LOCK_FD" ]; then
+		check_result "$E_INVALID" "port allocation requires the lock; call app_port_lock_acquire first"
+	fi
 
 	app_ports_taken_into taken
 

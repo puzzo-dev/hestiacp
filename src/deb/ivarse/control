@@ -6,7 +6,7 @@ Section: admin
 Maintainer: I-Varse Technologies <dev@ivarse.com>
 Homepage: https://github.com/puzzo-dev/hestiacp
 Architecture: all
-Depends: hestia (>= 1.10.0), curl, jq, tar, xz-utils, gnupg, gpgv, ca-certificates
+Depends: hestia (>= 1.10.0), curl, jq, tar, xz-utils, gnupg, gpgv, iproute2, util-linux, ca-certificates
 Description: I-Varse application runtimes for Hestia Control Panel
  Adds first-class application hosting to HestiaCP: applications are managed
  as Hestia objects, supervised by systemd, and reverse-proxied by the
