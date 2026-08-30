@@ -66,7 +66,12 @@ if ! node_runtime_resolve "$node_major"; then
 	check_result "$E_CONNECT" "unable to resolve Node.js $node_major from $NODE_DIST_MIRROR"
 fi
 
-staging=$(mktemp -d /tmp/ivarse-node.XXXXXXXX)
+# Staged inside the install root rather than /tmp so that the final move is a
+# same-filesystem rename, and so that a ~230MB unpacked runtime is written to
+# disk instead of being buffered in a tmpfs-backed /tmp.
+mkdir -p "$NODE_ROOT"
+chmod 755 "$NODE_ROOT"
+staging=$(mktemp -d "$NODE_ROOT/.staging.XXXXXXXX")
 trap cleanup_staging EXIT
 
 # Downloading the release tarball
@@ -95,9 +100,8 @@ fi
 
 echo "$node_full_version" > "$unpacked/.ivarse-version"
 
-# Moving the finished runtime into place
-mkdir -p "$NODE_ROOT"
-chmod 755 "$NODE_ROOT"
+# Moving the finished runtime into place. Same filesystem, so this is an atomic
+# rename: the runtime either appears complete or not at all.
 if ! mv "$unpacked" "$NODE_ROOT/$node_major"; then
 	check_result "$E_DISK" "unable to install runtime into $NODE_ROOT/$node_major"
 fi
