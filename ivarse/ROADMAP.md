@@ -305,18 +305,35 @@ is a client of it.
   `nodejs` **22/22**.
 
 ### F3 · Port allocator
-- **Status:** TODO
+- **Status:** IN REVIEW — on `feat/f3-port-allocator`
 - **Depends on:** F2
 - **Packaging:** adds-only ✅
-- **Scope:** Allocate a free loopback port per app. Own range (proposal:
-  30000–39999) so it never collides with php-fpm's 9000+ scanner. Allocation is
-  recorded in the registry and cross-checked against live listeners (`ss -ltn`)
-  — registry alone is not enough, a stray process can hold the port.
-- **Files:** `func/node.sh` (`get_next_app_port`)
-- **Acceptance:** allocating N apps yields N distinct ports; a port held by an
-  unrelated process is skipped; a deleted app's port is reusable.
-- **Do not:** reuse `v-change-web-domain-backend-tpl`'s scanner. It greps
-  php-fpm pool files and is meaningless here.
+- **Range changed to 30000–32767, not 30000–39999.** The proposed range
+  overlapped the kernel's ephemeral range — `net.ipv4.ip_local_port_range` is
+  `32768 60999` by default, an overlap of **7232 ports**. An outgoing
+  connection could transiently hold an application's port, so the application
+  would fail to bind on its next restart: intermittent, dependent on unrelated
+  traffic, and miserable to diagnose. Staying below the ephemeral floor leaves
+  2768 applications per host. A host needing more should reserve a wider range
+  with `net.ipv4.ip_local_reserved_ports` rather than overlap.
+- **Host-global, not per-user.** Ports belong to the host, so the scan covers
+  every user's registry. A per-user scan would hand the same port to two users.
+- **Two sources of truth.** The registry, plus `ss -ltn` for what is actually
+  listening — a process outside Hestia's knowledge can hold a port, and handing
+  it out would leave the application unable to start while blaming itself.
+- **Locked.** `app_port_lock_acquire`/`release` around both choosing a port and
+  writing the record that claims it. Without that, two concurrent creations get
+  the same port, because the first has not written its record when the second
+  scans.
+- **Files:** `func/app.sh`, `test/node-ports.bats`
+- **Acceptance:** allocating N applications yields N distinct ports; a port held
+  by an unrelated process is skipped; a deleted application's port is reusable.
+  ✅ **15/15**.
+- **Fixed in review:** the scan required whitespace before `PORT=`, so a field
+  at the start of a line was missed entirely — the same port handed to two
+  applications. And scanning spawned two processes per candidate, which took
+  **5372ms** on a nearly full range; building the taken-set once brought that to
+  **67ms**.
 
 ### F4 · Application CRUD
 - **Status:** TODO

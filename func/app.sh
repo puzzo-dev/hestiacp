@@ -40,10 +40,28 @@ APP_RUNTIMES="node"
 # Package managers a Node application may select
 APP_PACKAGE_MANAGERS="npm pnpm yarn bun"
 
-# Loopback port range for applications. Deliberately clear of php-fpm, whose
-# allocator in v-change-web-domain-backend-tpl starts at 9000.
+# Loopback port range for applications.
+#
+# Clear of php-fpm, whose allocator in v-change-web-domain-backend-tpl starts
+# at 9000, and - more importantly - entirely below the kernel's ephemeral
+# range. On a default Linux host that is 32768-60999, so the obvious
+# 30000-39999 would overlap it by more than seven thousand ports: an outgoing
+# connection could transiently hold an application's port, and the application
+# would then fail to bind on its next restart. That failure is intermittent and
+# depends on unrelated traffic, which makes it a miserable one to diagnose.
+#
+# 30000-32767 stays below the ephemeral floor, which leaves 2768 applications
+# per host. A host needing more should reserve a wider range with
+# net.ipv4.ip_local_reserved_ports and widen APP_PORT_MAX to match, rather than
+# overlapping the ephemeral range.
 APP_PORT_MIN=30000
-APP_PORT_MAX=39999
+APP_PORT_MAX=32767
+
+# Serialises port allocation. Allocation and recording must happen under the
+# same lock, otherwise two concurrent creations can be handed the same port:
+# the first has not written its record by the time the second scans for one in
+# use.
+APP_PORT_LOCK="/run/lock/ivarse-app-ports.lock"
 
 # Path to a user's application registry
 app_conf() {
@@ -99,6 +117,93 @@ app_autostart() {
 	else
 		echo "no"
 	fi
+}
+
+#----------------------------------------------------------#
+#                    Port allocation                        #
+#----------------------------------------------------------#
+
+# Take the allocation lock. Callers must hold it across both choosing a port
+# and writing the record that claims it.
+app_port_lock_acquire() {
+	mkdir -p "$(dirname "$APP_PORT_LOCK")" 2> /dev/null
+	exec {APP_PORT_LOCK_FD}> "$APP_PORT_LOCK" || return 1
+	flock -w 30 "$APP_PORT_LOCK_FD" || {
+		check_result "$E_LIMIT" "timed out waiting for the port allocation lock"
+	}
+}
+
+app_port_lock_release() {
+	[ -n "$APP_PORT_LOCK_FD" ] || return 0
+	flock -u "$APP_PORT_LOCK_FD" 2> /dev/null
+	exec {APP_PORT_LOCK_FD}>&- 2> /dev/null
+	APP_PORT_LOCK_FD=""
+}
+
+# Ports claimed by applications, across every user. Ports are a property of the
+# host, not of a user, so a per-user scan would hand the same port to two
+# different users.
+app_ports_claimed() {
+	local conf
+	for conf in "$HESTIA"/data/users/*/app.conf; do
+		[ -f "$conf" ] || continue
+		# The field may begin a line, so do not require whitespace before it -
+		# a missed claim means the same port handed out twice.
+		grep -o "\(^\|[[:space:]]\)PORT='[0-9]\{1,5\}'" "$conf" 2> /dev/null \
+			| grep -o "[0-9]\{1,5\}"
+	done
+}
+
+# Ports something is currently listening on. The registry alone is not enough:
+# a process outside Hestia's knowledge may hold a port, and handing it to an
+# application would leave that application unable to start with a message
+# pointing at the wrong thing.
+app_ports_listening() {
+	if [ -z "$(command -v ss)" ]; then
+		return 0
+	fi
+	ss -ltnH 2> /dev/null | awk '{print $4}' | sed -n 's/.*:\([0-9]\{1,5\}\)$/\1/p'
+}
+
+# Is a port free, by both measures?
+is_app_port_available() {
+	local port="$1"
+	app_ports_claimed | grep -qx "$port" && return 1
+	app_ports_listening | grep -qx "$port" && return 1
+	return 0
+}
+
+# Ports that cannot be handed out, as an associative array in the caller's
+# scope. Built once so that scanning the range does not spawn two processes per
+# candidate: with a nearly full range that took over five seconds.
+app_ports_taken_into() {
+	local -n _taken="$1"
+	local p
+	while read -r p; do
+		[ -n "$p" ] && _taken["$p"]=1
+	done < <(
+		app_ports_claimed
+		app_ports_listening
+	)
+}
+
+# Lowest free port in the application range.
+#
+# The caller must already hold the allocation lock, and must write the record
+# claiming the port before releasing it.
+get_next_app_port() {
+	local port
+	local -A taken=()
+
+	app_ports_taken_into taken
+
+	for ((port = APP_PORT_MIN; port <= APP_PORT_MAX; port++)); do
+		[ -n "${taken[$port]:-}" ] && continue
+		echo "$port"
+		return 0
+	done
+
+	check_result "$E_LIMIT" "no free application port in $APP_PORT_MIN-$APP_PORT_MAX"
 }
 
 #----------------------------------------------------------#
