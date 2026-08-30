@@ -292,8 +292,17 @@ is a client of it.
   `app_default_root <user> <app>` gives the path.
 - **Files:** `func/app.sh`, `func/node.sh`, `bin/v-update-sys-nodejs-keys`,
   `test/node-app.bats`
+- **Also fixed in review:** `mkdir -p`/`chown` on the base followed a symlink at
+  `.ivarse` — measured, it created `/etc/apps`. The chain is now built one
+  component at a time, refusing any that is already a symlink. A nested app
+  root failed with a confusing `mkdir` error and is now refused with a reason.
+- **Binding on F4/F5/F7:** store and use what `app_root_assert_safe` **echoes**,
+  never the value passed in. It is resolved *and* canonical — `.../apps/x/`,
+  `.../apps//x` and `.../apps/./x` all name the same directory, so storing the
+  raw value would mean a unit file disagreeing with the registry.
 - **Acceptance:** the app root cannot be swapped by its owner; a refreshed
-  keyring is preferred and still verifies a real runtime. ✅ **42/42**.
+  keyring is preferred and still verifies a real runtime. ✅ **45/45**, plus
+  `nodejs` **22/22**.
 
 ### F3 · Port allocator
 - **Status:** TODO
