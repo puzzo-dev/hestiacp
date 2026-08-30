@@ -1,0 +1,11 @@
+# Files shipped by the hestia-ivarse package, relative to the repository root.
+#
+# Every path here lands under /usr/local/hestia/ and MUST NOT be a path the
+# upstream hestia package owns. Adding an upstream-owned path here will make
+# dpkg refuse the install, which is the intended safeguard: this package is an
+# addition to Hestia, never a replacement for part of it.
+#
+# Check a candidate path with:
+#   dpkg -S /usr/local/hestia/<path>
+#
+# Directories are shipped recursively. Blank lines and # comments are ignored.

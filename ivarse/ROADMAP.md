@@ -30,21 +30,43 @@ is a client of it.
 
 ## Phase 1 — Node hosting v1
 
-### F0 · Fork + build pipeline
-- **Status:** IN PROGRESS
+### F0 · Add-on packaging + test box
+- **Status:** IN REVIEW
 - **Depends on:** —
-- **Tier:** 0
-- **Why first:** Nothing else can be verified until a deb can be built from this
-  tree and installed on a throwaway Hestia. `research.txt` is explicit that we do
-  not modify a production `/usr/local/hestia`.
-- **Scope:** Repo initialised with `origin` = fork, `upstream` = hestiacp/hestiacp.
-  Confirm `src/hst_autocompile.sh` builds `hestia` deb from this tree. Stand up a
-  test Hestia install separate from production. Document the build+deploy loop.
-- **Files:** `ivarse/BUILD.md` (new)
-- **Acceptance:** `./src/hst_autocompile.sh --hestia <branch>` produces a `.deb`;
-  installing it on the test box leaves the panel working and unchanged.
-- **Done:** repo + remotes wired, upstream diff confirmed empty.
-- **Open:** build not yet exercised; test host not yet chosen.
+- **Tier:** 0 — **touches zero upstream files**
+- **Why first:** nothing can be verified until the work can be built and
+  installed on a throwaway Hestia, and the shape of that package determines
+  whether upstream releases are a routine event or a manual one.
+- **Decided — ship as a separate `hestia-ivarse` package, not as a fork of
+  `hestia`.** The first attempt forked the `hestia` package with a `+ivarse1`
+  version and an apt pin. It worked, but made every upstream release manual:
+  merge, resolve the `control` version conflict that recurred every time,
+  rebuild, reinstall — and pinned Hestia away from its own security updates.
+  Measured: installing upstream's `hestia` over that fork took the Node commands
+  from four to zero, because dpkg removes the files the old version of *the same
+  package* owned.
+  A separate package that only *adds* files is untouched by a `hestia` upgrade.
+  ✅ verified — with the add-on installed, an unattended `v-update-sys-hestia-all`
+  upgraded Hestia and left every command, `func/node.sh`, the keyring and the
+  installed runtimes working; a new runtime installed cleanly after the upgrade.
+- **The one rule:** the add-on must never ship a path the `hestia` package owns.
+  `build-package.sh` checks every entry in `src/deb/ivarse/files.txt` against
+  dpkg's file database and refuses to build on a conflict; `testbox.sh verify`
+  checks the same after install.
+- **Decided — the test box is a Docker container**, not a second WSL distro or a
+  VM. Upstream ships `.github/docker/hestia-ci.Dockerfile` (Ubuntu 26.04,
+  systemd as PID 1); a Hestia install rewrites `/etc` heavily, so a disposable
+  container is the right blast radius. Hestia is installed **stock** in the box,
+  which is what makes `testbox.sh upgrade` a meaningful test.
+- **Files:** `src/deb/ivarse/{control,postinst,files.txt}`,
+  `ivarse/build-package.sh`, `ivarse/testbox.sh`, `ivarse/UPSTREAM.md` (all new)
+- **Acceptance:** the package builds, installs onto stock Hestia with no file
+  conflicts, and survives a Hestia upgrade.
+- **Cost, stated plainly:** features that must change Hestia's own behaviour —
+  a nav item in `panel.php`, a hook inside `v-delete-web-domain` — cannot be
+  done by adding a file. Those need `dpkg-divert` or an upstream contribution,
+  and each reintroduces an upgrade step for that file alone. Affects F10 and
+  F11 only; F1–F9 are unaffected. Keep the count at zero as long as possible.
 
 ### F1 · Node runtime install + version management
 - **Status:** TODO

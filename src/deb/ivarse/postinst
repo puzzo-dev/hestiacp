@@ -1,0 +1,21 @@
+#!/bin/bash
+
+set -e
+
+if [ "$1" != "configure" ]; then
+	exit 0
+fi
+
+if [ ! -d "/usr/local/hestia" ]; then
+	exit 0
+fi
+
+# Everything this package ships lives under paths Hestia does not own, so
+# there is nothing to merge or re-apply after a Hestia upgrade. Keep it that
+# way: if a future change needs to modify a file owned by the hestia package,
+# it does not belong in here.
+
+chmod 755 /usr/local/hestia/bin/v-*-node* 2> /dev/null || true
+chmod 755 /usr/local/hestia/bin/v-*-sys-nodejs* 2> /dev/null || true
+
+exit 0
