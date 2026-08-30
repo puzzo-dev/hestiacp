@@ -19,3 +19,8 @@ func/node.sh
 
 # Node.js release signing keys, used to verify SHASUMS256.txt
 install/common/nodejs
+
+# Application registry
+func/app.sh
+bin/v-list-node-app
+bin/v-list-node-apps

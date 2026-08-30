@@ -124,21 +124,39 @@ is a client of it.
   - `xz-utils` was undeclared. It is `Priority: standard`, not required.
 
 ### F2 · Application registry + data model
-- **Status:** TODO
+- **Status:** IN REVIEW — PR #7
 - **Depends on:** F0
 - **Packaging:** adds-only ✅
-- **Scope:** The runtime-agnostic `Application` object. `$USER_DATA/node.conf`
-  in Hestia `KEY='value'` line format, read through `parse_object_kv_list`.
-  Fields: `NAME DOMAIN RUNTIME RUNTIME_VERSION APP_ROOT PORT PACKAGE_MANAGER
-  BUILD_COMMAND START_COMMAND SERVICE_NAME STATUS SUSPENDED TIME DATE`.
-  `func/node.sh` holds shared helpers. `TPL='nodejs'` on the web domain is the
-  marker that a domain is Node-backed — **no change to the `web.conf` record
-  format**, so `v-add-web-domain` and `v-list-web-domain` are never touched.
-- **Files:** `func/node.sh`, `bin/v-list-node-app`, `bin/v-list-node-apps`
-- **Acceptance:** a hand-written `node.conf` round-trips through
-  `v-list-node-apps` in all four formats (shell/json/plain/csv).
-- **Note:** name the file/fields for the general case where it costs nothing.
-  `RUNTIME` exists from day one even though it is always `node` in Phase 1.
+- **Scope:** the runtime-agnostic `Application` object, plus the two listing
+  commands. Creating and mutating applications is F4.
+- **Decided — the registry is `$USER_DATA/app.conf`, not `node.conf`.**
+  `research.txt` makes Application the primitive and Node the first
+  implementation, so the file is named for the primitive. `RUNTIME='node'`
+  distinguishes rows, and a later `v-add-python-app` writes to the same file.
+  Because it uses Hestia's `KEY='value'` record format, Hestia's own helpers
+  work against it unchanged — `get_object_value 'app' 'NAME' "$app" '$PORT'`
+  and friends. ✅ verified in the suite.
+- **Decided — `func/app.sh` is separate from `func/node.sh`.** The registry is
+  the runtime-agnostic layer; `node.sh` stays Node-specific. Phase 2 reuses
+  `app.sh` untouched, which is the test of whether the abstraction was right.
+- **Decided — `APP_ROOT` defaults to `/home/<user>/web/<domain>/app`** as
+  `research.txt` suggests, but is a stored, configurable field so an
+  application can live elsewhere. It is validated to resolve inside the owning
+  user's home, with `..` rejected: it becomes a systemd `WorkingDirectory` and
+  the target of a build run as that user, so a path escaping the home directory
+  would cross Hestia's isolation boundary.
+- **Decided — `STATUS` is derived, never stored.** Whether an application is
+  running is a fact about systemd. Storing it guarantees eventual disagreement
+  with reality, so `app_status` reads `systemctl` and the registry cannot drift.
+- **Files:** `func/app.sh`, `bin/v-list-node-app`, `bin/v-list-node-apps`,
+  `test/node-app.bats` (all new)
+- **Acceptance:** a hand-written record round-trips through `v-list-node-apps`
+  in all four formats. ✅ verified — **16/16** on stock Hestia, including an
+  empty registry emitting valid JSON.
+- **Security:** command fields are rejected if they contain shell
+  metacharacters. They become a systemd `ExecStart` run as the owning user, and
+  they arrive from panel users, so quoting them safely is a losing game
+  compared with refusing them.
 
 ### F3 · Port allocator
 - **Status:** TODO
