@@ -305,7 +305,7 @@ is a client of it.
   `nodejs` **22/22**.
 
 ### F3 · Port allocator
-- **Status:** IN REVIEW — on `feat/f3-port-allocator`
+- **Status:** DONE — merged (`ab3aa8dd8`, `561618e6c`)
 - **Depends on:** F2
 - **Packaging:** adds-only ✅
 - **Range changed to 30000–32767, not 30000–39999.** The proposed range
