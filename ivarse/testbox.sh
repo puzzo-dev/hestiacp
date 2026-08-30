@@ -107,15 +107,21 @@ cmd_verify() {
 		dpkg-query -W -f="    hestia-ivarse: \${Version}\n" hestia-ivarse
 
 		bad=0
+		checked=0
+		# dpkg -L lists directories too, and shipped commands have no extension,
+		# so select real files rather than matching on the path text.
 		while IFS= read -r f; do
+			[ -f "$f" ] || continue
+			checked=$((checked + 1))
 			owner="$(dpkg -S "$f" 2>/dev/null | cut -d: -f1 || true)"
 			if [ "$owner" != "hestia-ivarse" ]; then
 				echo "    OWNERSHIP: $f is owned by ${owner:-nobody}" >&2
 				bad=1
 			fi
-		done < <(dpkg -L hestia-ivarse | grep -E "^/usr/local/hestia/.+\." || true)
+		done < <(dpkg -L hestia-ivarse)
+		[ "$checked" -gt 0 ] || { echo "    ERROR: package ships no files" >&2; exit 1; }
 		[ "$bad" -eq 0 ] || exit 1
-		echo "    every shipped file is owned by hestia-ivarse"
+		echo "    all $checked shipped files are owned by hestia-ivarse"
 	'
 }
 
