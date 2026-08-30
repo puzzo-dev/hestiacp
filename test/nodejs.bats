@@ -45,6 +45,18 @@ function setup() {
 	assert_output --partial 'already installed'
 }
 
+@test "Nodejs: Refuse to install over a partial runtime directory" {
+	# A directory left by a killed install or a failed delete. Installing into
+	# it used to nest the runtime and still report success.
+	mkdir -p "$NODE_ROOT/23/leftover"
+	run v-add-sys-nodejs 23
+	assert_failure $E_EXISTS
+	assert_output --partial 'is not a working runtime'
+	assert_dir_exist "$NODE_ROOT/23/leftover"
+	assert_dir_not_exist "$NODE_ROOT/23/bin"
+	rm -rf "$NODE_ROOT/23"
+}
+
 @test "Nodejs: Reject a non-numeric major version" {
 	run v-add-sys-nodejs 'twentytwo'
 	assert_failure $E_INVALID
