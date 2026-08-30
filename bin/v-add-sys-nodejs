@@ -59,17 +59,22 @@ if ! node_runtime_arch > /dev/null; then
 	check_result "$E_INVALID" "unsupported architecture :: $(uname -m)"
 fi
 
-for cmd in curl tar xz sha256sum; do
+for cmd in curl tar xz sha256sum gpg gpgv; do
 	if [ -z "$(command -v "$cmd")" ]; then
 		check_result "$E_NOTEXIST" "required command not found :: $cmd"
 	fi
 done
 
+if [ ! -s "$NODE_RELEASE_KEYRING" ]; then
+	check_result "$E_NOTEXIST" "Node.js release keyring not found :: $NODE_RELEASE_KEYRING"
+fi
+
 #----------------------------------------------------------#
 #                       Action                             #
 #----------------------------------------------------------#
 
-# Resolving the latest release of this major version upstream
+# Discovering which release the "latest" pointer for this major refers to.
+# This only selects a directory; nothing from it is trusted yet.
 if ! node_runtime_resolve "$node_major"; then
 	check_result "$E_CONNECT" "unable to resolve Node.js $node_major from $NODE_DIST_MIRROR"
 fi
@@ -85,15 +90,37 @@ if [ -z "$staging" ] || [ ! -d "$staging" ]; then
 fi
 trap cleanup_staging EXIT
 
+release_url="$NODE_DIST_MIRROR/v$node_full_version"
+
+# Fetching the release's checksum manifest and its detached signature
+if ! curl -fsSL --max-time 120 -o "$staging/SHASUMS256.txt" "$release_url/SHASUMS256.txt"; then
+	check_result "$E_CONNECT" "unable to download SHASUMS256.txt for $node_full_version"
+fi
+if ! curl -fsSL --max-time 120 -o "$staging/SHASUMS256.txt.sig" "$release_url/SHASUMS256.txt.sig"; then
+	check_result "$E_CONNECT" "unable to download SHASUMS256.txt.sig for $node_full_version"
+fi
+
+# Establishing that the manifest really was signed by a Node.js release key.
+# Everything downstream trusts these checksums, so this has to hold first.
+if ! node_runtime_verify_shasums \
+	"$staging/SHASUMS256.txt" \
+	"$staging/SHASUMS256.txt.sig" \
+	"$staging/release-keys.gpg"; then
+	check_result "$E_INVALID" "SHASUMS256.txt for $node_full_version is not signed by a known Node.js release key"
+fi
+
+# Taking the expected checksum from the manifest we just verified
+if ! node_runtime_checksum "$staging/SHASUMS256.txt" "$node_tarball"; then
+	check_result "$E_PARSING" "$node_tarball is not listed in the signed SHASUMS256.txt"
+fi
+
 # Downloading the release tarball
-if ! curl -fsSL --max-time 900 \
-	-o "$staging/$node_tarball" \
-	"$NODE_DIST_MIRROR/v$node_full_version/$node_tarball"; then
+if ! curl -fsSL --max-time 900 -o "$staging/$node_tarball" "$release_url/$node_tarball"; then
 	check_result "$E_CONNECT" "unable to download $node_tarball"
 fi
 
-# Verifying the checksum published alongside the release. A tarball that does
-# not match is never extracted.
+# Verifying the tarball against the signed checksum. A tarball that does not
+# match is never extracted.
 if ! (cd "$staging" && echo "$node_sha256  $node_tarball" | sha256sum -c --status -); then
 	check_result "$E_INVALID" "checksum mismatch for $node_tarball"
 fi
