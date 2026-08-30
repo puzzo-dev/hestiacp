@@ -164,6 +164,22 @@ function setup() {
 	assert_failure $E_INVALID
 }
 
+@test "Crud: Concurrent adds of the same name produce one application" {
+	# app_exists was checked outside the port lock, so two creations both saw
+	# no record and both wrote one - a duplicate name and a port allocated to
+	# nothing, with grep -m 1 hiding the second record.
+	conf="$HESTIA/data/users/$user/app.conf"
+	before=$(grep -c "NAME='race'" "$conf" 2> /dev/null || true)
+	[ "$before" -eq 0 ]
+	for _ in 1 2 3 4; do
+		v-add-node-app "$user" "$domain" race > /dev/null 2>&1 &
+	done
+	wait
+	run bash -c "grep -c \"NAME='race'\" '$conf'"
+	assert_output "1"
+	v-delete-node-app "$user" race yes > /dev/null 2>&1
+}
+
 @test "Crud: Delete keeps files by default" {
 	run v-delete-node-app "$user" api
 	assert_success
