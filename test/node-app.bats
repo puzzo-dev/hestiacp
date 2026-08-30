@@ -280,6 +280,30 @@ function write_app() {
 	rm -f "/home/$user/web/$domain/private/afile"
 }
 
+@test "AppRegistry: Creating an app root validates before it creates" {
+	# v-add-fs-directory also permits /tmp, so validating only afterwards left
+	# a stray directory behind on a rejected call.
+	rm -rf /tmp/ivarse-stray
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_create '$user' '/tmp/ivarse-stray'"
+	assert_failure
+	assert_dir_not_exist "/tmp/ivarse-stray"
+}
+
+@test "AppRegistry: Creating an app root enforces the path format itself" {
+	inject="$(printf '/home/%s/web/%s/private/a\nExecStartPost=/bin/id' "$user" "$domain")"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_create '$user' \"\$1\"" _ "$inject"
+	assert_failure $E_INVALID
+	assert_output --partial 'may only contain'
+}
+
+@test "AppRegistry: Containment checks refuse to run without HOMEDIR" {
+	# Without HOMEDIR the home would be computed as "/$user" and every
+	# containment check would be answering the wrong question.
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; HOMEDIR=''; app_root_assert_safe '$user' '/home/$user'"
+	assert_failure $E_INVALID
+	assert_output --partial 'HOMEDIR is not set'
+}
+
 @test "AppRegistry: An app name is not usable as a search pattern" {
 	# Unvalidated, a name like '.*' matched every record at once and the parser
 	# merged them into a single malformed object while exiting 0.
