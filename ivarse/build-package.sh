@@ -36,8 +36,11 @@ trap 'rm -rf "$staging"' EXIT
 
 mkdir -p "$staging/DEBIAN" "$staging/$HESTIA_PREFIX"
 cp "$PKG_DIR/control" "$staging/DEBIAN/control"
-[ -f "$PKG_DIR/postinst" ] && install -m 755 "$PKG_DIR/postinst" "$staging/DEBIAN/postinst"
-[ -f "$PKG_DIR/prerm" ] && install -m 755 "$PKG_DIR/prerm" "$staging/DEBIAN/prerm"
+for script in postinst prerm postrm preinst; do
+	if [ -f "$PKG_DIR/$script" ]; then
+		install -m 755 "$PKG_DIR/$script" "$staging/DEBIAN/$script"
+	fi
+done
 
 shipped=0
 conflicts=0
@@ -72,8 +75,9 @@ if [ "$conflicts" -gt 0 ]; then
 fi
 
 find "$staging/$HESTIA_PREFIX" -type d -exec chmod 755 {} +
-[ -d "$staging/$HESTIA_PREFIX/bin" ] && chmod 755 "$staging/$HESTIA_PREFIX/bin/"* 2> /dev/null || true
-chown -R root:root "$staging" 2> /dev/null || true
+if [ -d "$staging/$HESTIA_PREFIX/bin" ]; then
+	chmod 755 "$staging/$HESTIA_PREFIX/bin/"*
+fi
 
 mkdir -p "$OUT_DIR"
 deb="$OUT_DIR/hestia-ivarse_${version}_all.deb"
