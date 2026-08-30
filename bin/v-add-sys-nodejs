@@ -47,6 +47,14 @@ if node_runtime_exists "$node_major"; then
 	check_result "$E_EXISTS" "Node.js $node_major is already installed"
 fi
 
+# A path that exists without a working binary is a partial install: a killed
+# process, a failed delete, a hand-made directory. Refuse rather than install
+# into it - mv would nest the new runtime inside it and report success while
+# leaving nothing runnable at the expected path.
+if [ -e "$NODE_ROOT/$node_major" ]; then
+	check_result "$E_EXISTS" "$NODE_ROOT/$node_major exists but is not a working runtime; remove it first"
+fi
+
 if ! node_runtime_arch > /dev/null; then
 	check_result "$E_INVALID" "unsupported architecture :: $(uname -m)"
 fi
@@ -72,6 +80,9 @@ fi
 mkdir -p "$NODE_ROOT"
 chmod 755 "$NODE_ROOT"
 staging=$(mktemp -d "$NODE_ROOT/.staging.XXXXXXXX")
+if [ -z "$staging" ] || [ ! -d "$staging" ]; then
+	check_result "$E_DISK" "unable to create a staging directory under $NODE_ROOT"
+fi
 trap cleanup_staging EXIT
 
 # Downloading the release tarball
@@ -102,7 +113,8 @@ echo "$node_full_version" > "$unpacked/.ivarse-version"
 
 # Moving the finished runtime into place. Same filesystem, so this is an atomic
 # rename: the runtime either appears complete or not at all.
-if ! mv "$unpacked" "$NODE_ROOT/$node_major"; then
+# -T so the runtime can never be nested inside an existing directory
+if ! mv -T "$unpacked" "$NODE_ROOT/$node_major"; then
 	check_result "$E_DISK" "unable to install runtime into $NODE_ROOT/$node_major"
 fi
 
