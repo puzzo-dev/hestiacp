@@ -1,13 +1,16 @@
 ---
 name: ivarse-hestia
-description: Use for ALL work on this I-Varse HestiaCP fork - adding runtimes (Node/Python/Docker/Cloudflare), v-* CLI commands, web templates, panel pages, or anything touching bin/, func/, install/deb/templates/, web/, src/deb/. Enforces the fixed architecture, the merge-risk tiers that keep the fork mergeable with upstream, and the track-before-you-build workflow.
+description: Use for ALL work on I-Varse Hestia - adding runtimes (Node/Python/Docker/Cloudflare), v-* CLI commands, web templates, panel pages, or anything touching bin/, func/, install/, web/, src/deb/. Enforces the fixed architecture, the adds-only packaging rule that keeps Hestia self-updating, and the track-before-you-build workflow.
 ---
 
 # I-Varse Hestia
 
-Fork of HestiaCP (`puzzo-dev/hestiacp`, base `hestiacp/hestiacp` v1.10.4) that adds
-first-class application runtimes to Hestia. Node.js first, then Python, Docker,
-Cloudflare Workers.
+Adds first-class application runtimes to HestiaCP — Node.js first, then Python,
+Docker, Cloudflare Workers.
+
+The repo (`puzzo-dev/hestiacp`) tracks upstream `hestiacp/hestiacp` v1.10.4, but
+**Hestia is not forked**. The work ships as a separate `hestia-ivarse` package,
+so a box runs stock Hestia plus the add-on and Hestia updates itself normally.
 
 ## Fixed premises — do not redesign
 
@@ -27,8 +30,9 @@ the user changes it.
 5. **Everything goes through the CLI layer.** Panel PHP calls
    `sudo /usr/local/hestia/bin/v-*`. The panel never writes nginx config, never
    touches systemd, never shells out to `npm`.
-6. **Ship as a fork built into a deb**, never as edits to a live
-   `/usr/local/hestia`. Build with `src/hst_autocompile.sh`.
+6. **Ship as the `hestia-ivarse` add-on package**, never as edits to a live
+   `/usr/local/hestia`. Build with `ivarse/build-package.sh`. Hestia itself is
+   installed stock and is never modified.
 7. **No OpenStack, no Frappe/OpsCloud, no multi-server, no billing.** Out of
    scope until the user says otherwise.
 
@@ -48,28 +52,37 @@ and deferred.
 - New work discovered mid-task becomes a new roadmap item. It does not get
   silently folded into the current one.
 
-## Merge-risk tiers
+## The one rule: add files, never replace them
 
-The stated top engineering risk is the fork becoming unmergeable. Every change
-must be classified, and the tier must be stated in the roadmap entry.
+This is not a fork of HestiaCP. The work ships as a separate `hestia-ivarse`
+package that adds files under `/usr/local/hestia/` and replaces none of
+Hestia's. That is what lets Hestia update itself through its own channels with
+no merge, no rebuild and no procedure.
 
-- **Tier 0 — new files.** New `bin/v-*`, `func/node.sh`, new templates under
-  `install/deb/templates/web/nginx/`, new panel pages, new `src/deb/` package.
-  Zero conflict. **~95% of the work belongs here. Push work down into Tier 0.**
-- **Tier 1 — one-to-three-line additions to a list.** A nav item in
-  `web/templates/includes/panel.php`, a `case` in `is_format_valid`
-  (`func/main.sh`), a key in `v-list-sys-config`. Acceptable.
-- **Tier 2 — logic inserted into upstream control flow.** `v-delete-web-domain`,
-  `v-suspend-web-domain`, `v-backup-user`, `v-restore-user`, `func/rebuild.sh`.
-  **Required mitigation:** add exactly one hook line to the upstream file and put
-  all logic in `func/ivarse-hooks.sh`. Five multi-line diffs become five
-  one-line diffs.
-- **Tier 3 — editing upstream logic in place.** Above all the sed variable list
-  in `add_web_config()` (`func/domain.sh`). **Avoid.** Requires explicit user
-  sign-off recorded in the roadmap entry.
+**Never ship a path the `hestia` package owns.** Before adding anything to
+`src/deb/ivarse/files.txt`:
 
-Every Tier 1+ change gets a comment marker so it is greppable:
-`# IVARSE: <one-line reason>`.
+```sh
+dpkg -S /usr/local/hestia/<path>
+```
+
+If that names `hestia`, the file cannot be shipped. Find another design.
+
+It is enforced, not trusted: `ivarse/build-package.sh` refuses to build on a
+conflict, and `ivarse/testbox.sh verify` re-checks every installed file. Do not
+work around either — they are the reason upstream updates are free.
+
+Practical consequences you will hit:
+
+- Validators go in `func/node.sh` and are called directly. Adding a case to
+  `is_format_valid` means shipping `func/main.sh`, which is Hestia's.
+- Lifecycle hooks cannot be inserted into `v-delete-web-domain` and friends.
+- A panel nav item cannot be added to `panel.php`.
+
+The last two need `dpkg-divert` or an upstream contribution, and each one
+reintroduces an upgrade step for that file alone. **That count is currently
+zero. Keep it there.** If a feature seems to need it, say so and get a decision
+rather than quietly patching an upstream file.
 
 ## Conventions
 
@@ -104,7 +117,8 @@ Re-verify before relying on any of these; do not trust general Hestia knowledge.
   it grants every panel user the new command. Write a purpose-built
   `v-build-node-app` that does its own `runuser -u "$user"` with a fixed argv.
 - `add_web_config()` in `func/domain.sh` substitutes a **fixed sed list** of
-  `%var%` tokens. There is no `%node_port%` and adding one is Tier 3.
+  `%var%` tokens. There is no `%node_port%`, and `func/domain.sh` is Hestia's,
+  so one cannot be added. Use the per-domain include instead.
 - Every stock nginx template ends with
   `include %home%/%user%/conf/web/%domain%/nginx.conf_*;` (HTTP) and
   `nginx.ssl.conf_*` (HTTPS). **Two separate include points — always write both files.**
@@ -122,14 +136,17 @@ Re-verify before relying on any of these; do not trust general Hestia knowledge.
   domains still need a valid `BACKEND` — use the shipped `no-php` template.
 - `bin/v-update-web-templates` uses `cp -rf`, which copies over and never deletes.
   Custom templates in `$HESTIA/data/templates/web/nginx/` survive upstream
-  template updates.
-- `src/hst_autocompile.sh` ships `bin func install web` wholesale into
-  `/usr/local/hestia/`. New files in those trees need no packaging changes.
+  template updates. Note those live under `data/`, which the package does not
+  own, so they are placed at runtime rather than shipped.
+- `src/hst_autocompile.sh` builds **Hestia's** deb and is not used here.
+  `ivarse/build-package.sh` builds `hestia-ivarse` from
+  `src/deb/ivarse/files.txt`, so nothing is added to a file upstream maintains.
 - `src/deb/web-terminal/` is the working precedent for a Node service: unit file,
   deb, postinst that reloads systemd. **Copy that pattern rather than inventing one.**
 - `bin/v-backup-user` captures a domain by `grep "DOMAIN='$domain'" web.conf` plus
-  the domain conf dir. A separate registry file is **invisible to backup** unless
-  explicitly hooked. Same for restore.
+  the domain conf dir. A separate registry file is **invisible to backup**, and
+  `v-backup-user` is Hestia's so it cannot be patched — ship a separate
+  `v-backup-node-apps` instead.
 - `install/common/bubblewrap/jailbash` uses `--unshare-all --share-net`, so jailed
   shells do have network, but `--tmpfs /usr/local/hestia` hides the Hestia CLI
   from inside the jail.
@@ -138,10 +155,20 @@ Re-verify before relying on any of these; do not trust general Hestia knowledge.
 
 ## Verification
 
-There is no Hestia running on this machine. Bash-level work is verified by
-`bash -n`, `shellcheck`, and unit-style tests under `test/`; anything touching
-nginx, systemd, or a live panel is verified on the user's **test** Hestia
-install, never on production. State plainly which of the two happened.
+`ivarse/testbox.sh` runs a disposable **stock** Hestia in Docker:
+
+```
+./ivarse/testbox.sh up | hestia | install | verify | test | upgrade | down
+```
+
+`up` and `hestia` are slow and run once per box; `install` and `test` are the
+fast inner loop. `upgrade` upgrades Hestia underneath the add-on and re-runs the
+suite — run it before claiming anything about upgrade safety.
+
+Anything touching systemd, nginx, file ownership or root-only behaviour must be
+verified there, not reasoned about. State plainly what ran on the box and what
+did not, and never describe something as verified when a different mechanism
+happened to produce the same result.
 
 ## Delivery workflow — no direct commits to main
 
@@ -152,9 +179,10 @@ Every functionality ships as its own reviewed PR. This is a hard rule.
 2. Branch off `main`. Never commit to `main` directly.
 3. Build the item, and **only** that item. Anything else discovered becomes a new
    roadmap entry, not extra commits on this branch.
-4. Open the PR with `gh pr create`. The body states: roadmap item, merge-risk
-   tier of every file touched, the acceptance test, and what was actually
-   verified versus what still needs the test Hestia box.
+4. Open the PR with `gh pr create --repo puzzo-dev/hestiacp` — without
+   `--repo` it targets upstream hestiacp/hestiacp. The body states: roadmap
+   item, confirmation that every file is adds-only, the acceptance test, and
+   what was actually verified on the test box versus what was not.
 5. **Review the PR before merging** — run `/code-review` against it and report
    findings. Do not merge on your own initiative; the user merges or tells you to.
 6. Only after merge: mark the roadmap item `DONE` and move to the next.

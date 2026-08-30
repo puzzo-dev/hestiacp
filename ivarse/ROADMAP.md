@@ -3,10 +3,12 @@
 Single source of truth for what is built, in progress, and deferred.
 Read `.claude/skills/ivarse-hestia/SKILL.md` before touching any item.
 
-Base: `hestiacp/hestiacp` v1.10.4 @ `4771643`. Fork currently has **zero
-divergence** from upstream — clean slate.
+Base: `hestiacp/hestiacp` v1.10.4. **Hestia itself is not forked.** The
+I-Varse work ships as a separate `hestia-ivarse` package that adds files under
+`/usr/local/hestia/` and replaces none, so Hestia updates through its own
+channels with no merge, no rebuild and no procedure. See `ivarse/UPSTREAM.md`.
 
-**Status values:** `TODO` · `IN PROGRESS` · `DONE` · `BLOCKED` · `DEFERRED`
+**Status values:** `TODO` · `IN PROGRESS` · `IN REVIEW` · `DONE` · `BLOCKED` · `DEFERRED`
 
 **Phase 1 goal (the only goal right now):** get `ivarseltd.com` and the Ofada
 Girl site off Cloudflare Workers and back onto the Namecheap VPS, served as
@@ -15,13 +17,36 @@ Payload CMS.
 
 ---
 
+## The constraint everything obeys
+
+**The add-on must never ship a path the `hestia` package owns.** That single
+rule is what buys automatic upstream updates. It is enforced, not trusted:
+`ivarse/build-package.sh` refuses to build on a conflict, and
+`ivarse/testbox.sh verify` re-checks every installed file after install.
+
+Before adding any path to `src/deb/ivarse/files.txt`:
+
+```sh
+dpkg -S /usr/local/hestia/<path>
+```
+
+If that names `hestia`, the file cannot be shipped and the feature needs a
+different design. Items below are marked **adds-only** when they satisfy this,
+and **needs divert** when they do not.
+
+The old merge-risk tiers are gone. They existed to manage a fork; there is no
+fork. What replaced them is this one rule plus the `needs divert` count, which
+should stay at zero for as long as possible.
+
+---
+
 ## Ordering rationale
 
 Urgency is taken from `research.txt`: Phase 1 is *only* Node hosting, and within
 it the objective is a working runtime before any UI polish or Git deployment.
 F1–F8 are the critical path to a live HTTPS Next.js site. F9–F10 make it usable
-without SSH. F11–F13 stop it corrupting the rest of Hestia. F14 is what keeps
-the fork alive past six months.
+without SSH. F11–F13 stop it corrupting the rest of Hestia. F14 keeps the
+add-on honest over time.
 
 Do not start F10 (UI) before F1–F8 are `DONE`. The CLI is the product; the panel
 is a client of it.
@@ -33,7 +58,7 @@ is a client of it.
 ### F0 · Add-on packaging + test box
 - **Status:** IN REVIEW
 - **Depends on:** —
-- **Tier:** 0 — **touches zero upstream files**
+- **Packaging:** adds-only ✅ — touches zero upstream files
 - **Why first:** nothing can be verified until the work can be built and
   installed on a throwaway Hestia, and the shape of that package determines
   whether upstream releases are a routine event or a manual one.
@@ -69,33 +94,46 @@ is a client of it.
   F11 only; F1–F9 are unaffected. Keep the count at zero as long as possible.
 
 ### F1 · Node runtime install + version management
-- **Status:** TODO
+- **Status:** IN REVIEW — PR #3, stacked on #2
 - **Depends on:** F0
-- **Tier:** 0
-- **Scope:** Install Node on the host and support more than one major version so
-  apps can pin `20.x` / `22.x` / `24.x`. Decide the mechanism (NodeSource per
-  major vs. a managed `/opt/ivarse/node/<ver>` tree) — `v-add-sys-web-terminal`
-  already does the NodeSource dance for a single version and is the reference.
-  Corepack for pnpm/yarn.
-- **Files:** `bin/v-add-sys-nodejs`, `bin/v-delete-sys-nodejs`,
-  `bin/v-list-sys-nodejs`
-- **Acceptance:** `v-list-sys-nodejs json` reports each installed major and its
-  absolute binary path; two majors coexist.
-- **Decision needed:** multi-version mechanism. NodeSource cannot install two
-  majors side by side from apt — this needs resolving before F5 writes an
-  `ExecStart` that pins a version.
+- **Packaging:** adds-only ✅
+- **Decided:** official nodejs.org tarballs into `/opt/ivarse/node/<major>`,
+  one directory per major, root-owned. NodeSource apt was rejected because apt
+  can hold only one Node major at a time, which would defeat per-app pinning —
+  the entire point of this item.
+- **Files:** `func/node.sh`, `bin/v-{add,delete,list}-sys-nodejs`,
+  `bin/v-change-sys-nodejs-default`, `test/nodejs.bats` (all new)
+- **Consequence of adds-only:** the major-version validator is called directly
+  rather than routed through `is_format_valid` in `func/main.sh`. Adding a case
+  there would mean shipping a hestia-owned file — the build would refuse and the
+  next Hestia upgrade would revert it. Mildly against Hestia convention; the
+  alternative is a package that cannot be installed.
+- **Acceptance:** two majors coexist, each pinnable. ✅ verified — 22.23.2 and
+  24.20.0 side by side on stock Hestia, npm 10.9.8, corepack shims present.
+- **Verified on a real installation:** 22/22 bats as root on stock Hestia,
+  and again after Hestia was upgraded underneath the add-on.
+- **Bugs found in review, all fixed:**
+  - staging in `/tmp` made the final move a cross-filesystem copy rather than an
+    atomic rename, so a failure could leave a partial runtime at the final path;
+    it also buffered ~230MB through tmpfs. Now staged inside `NODE_ROOT`.
+  - a directory existing without a working `bin/node` passed the "not installed"
+    check, and `mv` then nested the runtime inside it while **reporting exit 0**.
+    Now refused explicitly, and `mv -T` makes nesting impossible.
+  - `mktemp`'s result was used unchecked; a failure would have written the
+    download to `/`.
+  - `xz-utils` was undeclared. It is `Priority: standard`, not required.
 
 ### F2 · Application registry + data model
 - **Status:** TODO
 - **Depends on:** F0
-- **Tier:** 0
+- **Packaging:** adds-only ✅
 - **Scope:** The runtime-agnostic `Application` object. `$USER_DATA/node.conf`
   in Hestia `KEY='value'` line format, read through `parse_object_kv_list`.
   Fields: `NAME DOMAIN RUNTIME RUNTIME_VERSION APP_ROOT PORT PACKAGE_MANAGER
   BUILD_COMMAND START_COMMAND SERVICE_NAME STATUS SUSPENDED TIME DATE`.
   `func/node.sh` holds shared helpers. `TPL='nodejs'` on the web domain is the
   marker that a domain is Node-backed — **no change to the `web.conf` record
-  format**, which keeps `v-add-web-domain` and `v-list-web-domain` at Tier 0.
+  format**, so `v-add-web-domain` and `v-list-web-domain` are never touched.
 - **Files:** `func/node.sh`, `bin/v-list-node-app`, `bin/v-list-node-apps`
 - **Acceptance:** a hand-written `node.conf` round-trips through
   `v-list-node-apps` in all four formats (shell/json/plain/csv).
@@ -105,7 +143,7 @@ is a client of it.
 ### F3 · Port allocator
 - **Status:** TODO
 - **Depends on:** F2
-- **Tier:** 0
+- **Packaging:** adds-only ✅
 - **Scope:** Allocate a free loopback port per app. Own range (proposal:
   30000–39999) so it never collides with php-fpm's 9000+ scanner. Allocation is
   recorded in the registry and cross-checked against live listeners (`ss -ltn`)
@@ -119,7 +157,7 @@ is a client of it.
 ### F4 · Application CRUD
 - **Status:** TODO
 - **Depends on:** F2, F3
-- **Tier:** 0
+- **Packaging:** adds-only ✅
 - **Scope:** `v-add-node-app` (validate, allocate port, create `APP_ROOT`, write
   registry, generate unit + nginx include, do **not** auto-start),
   `v-delete-node-app` (stop, disable, remove unit, remove includes, free port,
@@ -128,7 +166,8 @@ is a client of it.
   `app_port`, `package_manager`, `start_command`, `build_command` — the command
   fields need careful validation, they end up in a systemd `ExecStart`.
 - **Files:** `bin/v-add-node-app`, `bin/v-delete-node-app`,
-  `bin/v-change-node-app-*`, `func/main.sh` (Tier 1: `is_format_valid` cases)
+  `bin/v-change-node-app-*`. Validators live in `func/node.sh` and are called
+  directly — `func/main.sh` belongs to `hestia` and cannot be shipped.
 - **Acceptance:** add → list → change → delete leaves no unit file, no nginx
   include, no registry line, and no leaked port.
 - **Security:** start/build commands are attacker-controlled input from panel
@@ -138,7 +177,7 @@ is a client of it.
 ### F5 · systemd unit generation + lifecycle
 - **Status:** TODO
 - **Depends on:** F1, F4
-- **Tier:** 0
+- **Packaging:** adds-only ✅
 - **Scope:** Template `ivarse-node-{user}-{app}.service` under
   `/etc/systemd/system/`. `User=`/`Group=` the Hestia user, `WorkingDirectory=`
   the app root, `Environment=PORT=`, `Restart=on-failure`, hardening
@@ -156,7 +195,7 @@ is a client of it.
 ### F6 · Nginx integration
 - **Status:** TODO
 - **Depends on:** F3
-- **Tier:** 0
+- **Packaging:** adds-only ✅
 - **Scope:** `nodejs.tpl` / `nodejs.stpl` that deliberately **omit `location /`**
   and keep the `nginx.conf_*` / `nginx.ssl.conf_*` includes. `v-add-node-app`
   writes `nginx.conf_ivarse_app` and `nginx.ssl.conf_ivarse_app` carrying the
@@ -170,14 +209,15 @@ is a client of it.
   works through `/.well-known/`.
 - **Why this shape:** rebuild regenerates the tpl-derived config but never
   touches `nginx.conf_*`, so the port stays entirely inside our subsystem and no
-  upstream template variable has to be added (that would be Tier 3).
+  upstream template variable has to be added — `func/domain.sh` belongs to
+  `hestia` and cannot be shipped.
 - **Watch:** template selection differs between nginx-only and nginx+Apache
   installs. Confirm which the target VPS runs before writing the stpl.
 
 ### F7 · Build pipeline
 - **Status:** TODO
 - **Depends on:** F1, F4
-- **Tier:** 0
+- **Packaging:** adds-only ✅
 - **Scope:** `v-build-node-app` runs install-then-build as the Hestia user via
   `runuser`, with a timeout, a concurrency guard, and full output captured to a
   build log. npm / pnpm / yarn / bun.
@@ -190,7 +230,7 @@ is a client of it.
 ### F8 · Environment variables
 - **Status:** TODO
 - **Depends on:** F4, F5
-- **Tier:** 0
+- **Packaging:** adds-only ✅
 - **Scope:** Per-app env file at `$USER_DATA/node/<app>.env`, mode 0600, injected
   via systemd `EnvironmentFile=`. Needed immediately — the frontends reach the
   Payload CMS through env config.
@@ -202,7 +242,7 @@ is a client of it.
 ### F9 · Logs, status, resource visibility
 - **Status:** TODO
 - **Depends on:** F5, F7
-- **Tier:** 0
+- **Packaging:** adds-only ✅
 - **Scope:** `v-list-node-app-log` over `journalctl -u`, build log tail, running
   state, PID, CPU and RSS.
 - **Files:** `bin/v-list-node-app-log`, `bin/v-list-node-app-status`
@@ -211,40 +251,56 @@ is a client of it.
 ### F10 · Panel UI
 - **Status:** TODO
 - **Depends on:** F4–F9
-- **Tier:** 0 for new pages, 1 for the nav entry
+- **Packaging:** ⚠️ **needs divert** — the nav entry edits an upstream file
 - **Scope:** List / add / edit pages matching the `research.txt` mockup (domain,
   app root, node version, package manager, build command, start command, port,
   env vars, create). Start/stop/restart controls, log viewer. All through
   `HESTIA_CMD` — the panel calls `v-*` and nothing else.
 - **Files:** `web/list/node/`, `web/add/node/`, `web/edit/node/`,
   `web/templates/pages/{list,add,edit}_node.php`,
-  `web/templates/includes/panel.php` (Tier 1, one nav item)
+  `web/templates/includes/panel.php` (**hestia-owned**, see the note below)
 - **Acceptance:** an app can be created, built, started and inspected without SSH.
+- **Packaging problem:** new pages under `web/list/node/` etc. are adds-only and
+  fine. The nav entry in `web/templates/includes/panel.php` is not — that file
+  belongs to `hestia`. Options, none chosen yet: `dpkg-divert` plus a dpkg
+  trigger that re-applies the edit after every Hestia upgrade; a small
+  JS/CSS injection from a file we do own; or contributing a nav hook upstream.
+  **Decide before starting.** Whatever is chosen reintroduces an upgrade step
+  for that one file.
 
 ### F11 · Web domain lifecycle hooks
 - **Status:** TODO
 - **Depends on:** F4
-- **Tier:** 2 — **mitigation mandatory**
+- **Packaging:** ⚠️ **needs divert** — hooks live inside upstream commands
 - **Scope:** Deleting or suspending a web domain must not orphan a systemd unit
   or leak a port. Add exactly one hook line to each upstream command and put all
   logic in `func/ivarse-hooks.sh`.
-- **Files:** `func/ivarse-hooks.sh` (new, Tier 0),
+- **Files:** `func/ivarse-hooks.sh` (new, adds-only),
   `bin/v-delete-web-domain`, `bin/v-suspend-web-domain`,
   `bin/v-unsuspend-web-domain`, `func/rebuild.sh` — one `# IVARSE:` line each
 - **Acceptance:** deleting a Node-backed domain removes the unit and frees the
   port; suspending stops the app; unsuspending restarts it.
-- **Risk:** this is the item most likely to conflict on an upstream merge. Keep
-  the diffs to one line each, no exceptions.
+- **Packaging problem:** `v-delete-web-domain` and the suspend/unsuspend
+  commands belong to `hestia`. The add-on cannot patch them. Options, none
+  chosen yet: `dpkg-divert` on those specific commands with a trigger to
+  re-apply after upgrades; a systemd path unit watching `web.conf` for
+  deletions; or contributing hook points upstream, which is the clean answer and
+  the slow one. **Decide before starting.**
+- **Interim safety:** until this exists, deleting a Node-backed web domain
+  leaks a systemd unit and a port. Document it rather than pretend otherwise.
 
 ### F12 · Backup and restore
 - **Status:** TODO
 - **Depends on:** F2, F8
-- **Tier:** 2 — **mitigation mandatory**
+- **Packaging:** ⚠️ **needs divert** — hooks live inside upstream commands
 - **Scope:** `v-backup-user` walks `web.conf` per domain and knows nothing about
   a separate registry, so app records, env files and the app root are **silently
   absent from backups** until hooked. Same on restore.
-- **Files:** `bin/v-backup-user`, `bin/v-restore-user` — one hook line each;
-  logic in `func/ivarse-hooks.sh`
+- **Packaging problem:** `v-backup-user` and `v-restore-user` belong to
+  `hestia`. Same constraint as F11. A separate `v-backup-node-apps` the admin or
+  a cron calls alongside Hestia's backup avoids diverting anything and is
+  probably the right first answer.
+- **Files:** `bin/v-backup-node-apps`, `bin/v-restore-node-apps` (new, adds-only)
 - **Acceptance:** back up a user with a running Node app, restore onto a clean
   box, app starts and serves.
 - **Note:** this gap is not in `research.txt` and is easy to discover only after
@@ -253,25 +309,32 @@ is a client of it.
 ### F13 · Permissions, isolation, limits
 - **Status:** TODO
 - **Depends on:** F4, F5
-- **Tier:** 0, plus Tier 1 for the package key
+- **Packaging:** adds-only ✅ for the commands; the package-limit key is a
+  `hestia`-owned file, see note below
 - **Scope:** A user may only manage apps on domains they own — enforce in the CLI
   with `is_object_valid`/`get_user_owner`, not in the panel. `NODE_APPS` limit in
   the package format. Confirm behaviour under Hestia's cgroup enforcement
   (`v-update-user-cgroup`) so one runaway Next.js build cannot take the VPS down.
-- **Files:** `install/common/packages/*.pkg` (Tier 1), the `v-*-node-app` commands
+- **Files:** the `v-*-node-app` commands. `install/common/packages/*.pkg` is
+  **hestia-owned**; a per-user limit stored in our own registry avoids touching it.
 - **Acceptance:** user A cannot start, stop, or read the logs of user B's app.
 
-### F14 · Upstream merge maintenance
+### F14 · Keeping the add-on add-only
 - **Status:** TODO
-- **Depends on:** F11, F12
-- **Tier:** —
-- **Scope:** `research.txt` calls this the biggest engineering risk in the
-  project. Write down the procedure: `git fetch upstream`, review the diff
-  against the `# IVARSE:` grep list, merge, rebuild the deb, run the test suite,
-  reinstall on the test box. Keep a living inventory of every Tier 1+ touch point.
-- **Files:** `ivarse/UPSTREAM.md` (new), `ivarse/TOUCHPOINTS.md` (new)
-- **Acceptance:** a real upstream release merges with conflicts only in files
-  listed in `TOUCHPOINTS.md`.
+- **Depends on:** F0
+- **Packaging:** adds-only ✅
+- **Scope:** `research.txt` called an unmergeable fork the biggest engineering
+  risk in the project. The add-on packaging removes most of it: there is no
+  fork, so there is nothing to merge on an upstream release. What remains is
+  keeping it that way.
+- **What to maintain:** a short list of anything that needs `dpkg-divert`,
+  currently empty and ideally staying that way. Every entry is a file that must
+  be re-checked on each Hestia release. F10 and F11 are the two candidates.
+- **Also:** a periodic job that installs the current upstream Hestia in the test
+  box, layers the add-on, and runs the suite — so a breaking upstream change is
+  found by us rather than by a customer.
+- **Acceptance:** a real upstream Hestia release installs on a box running the
+  add-on with no manual step and no test failures.
 
 ---
 
@@ -305,16 +368,28 @@ from Phase 1 by `research.txt`.
 
 ---
 
+## Decisions made
+
+| | Decision | Why |
+|---|---|---|
+| **Fork or add-on** | **Add-on.** A separate `hestia-ivarse` package that adds files and replaces none | Forking made every upstream release a manual merge-and-rebuild and pinned Hestia away from its own security updates. Measured: upstream's package over the fork took the Node commands 4 → 0 |
+| **Node install mechanism** | Official nodejs.org tarballs into `/opt/ivarse/node/<major>` | NodeSource apt holds only one Node major at a time, which defeats per-app pinning |
+| **Release trust** | Verify the GPG signature on `SHASUMS256.txt`, not just the checksum | A self-consistent hostile mirror passed a checksum-only check and installed its payload as `node` |
+| **Test box** | Disposable Docker container running **stock** Hestia | A Hestia install rewrites `/etc` heavily; stock Hestia inside is what makes the upgrade test real |
+| **Target web stack** | nginx only | Answered directly; decides where the F6 templates live |
+
 ## Open decisions
 
 Blocking questions, to resolve before the dependent item starts.
 
-1. **Multi-version Node mechanism** (blocks F1, then F5). NodeSource apt cannot
-   hold two majors at once.
-2. **App root layout** (blocks F4). `/home/user/web/<domain>/app/` alongside
-   `public_html`, versus registering an arbitrary directory.
-   `research.txt` leaves this open and flags it as needing care.
-3. **Target VPS web stack** (blocks F6). nginx-only or nginx+Apache decides which
-   template directory the Node templates go in.
-4. **One app per domain, or many?** Phase 1 needs one. The registry is app-keyed
-   either way, so this only affects the nginx include and the UI.
+1. **App root layout** (blocks F4). `/home/<user>/web/<domain>/app/` alongside
+   `public_html`, versus registering an arbitrary directory. `research.txt`
+   leaves this open and flags it as needing care. **This is the next decision
+   needed.**
+2. **One app per domain, or many?** (affects F6, F10). Phase 1 needs one. The
+   registry is app-keyed either way, so this only changes the nginx include and
+   the UI.
+3. **How F10 and F11 modify Hestia's own behaviour** — the only two items that
+   cannot be adds-only. `dpkg-divert` plus a dpkg trigger, a systemd path unit
+   watching `web.conf`, or contributing hook points upstream. Not needed until
+   F10; decide before starting it.
