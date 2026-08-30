@@ -203,6 +203,16 @@ is_app_root_format_valid() {
 		"$resolved_home"/*) ;;
 		*) check_result "$E_FORBIDEN" "app root resolves outside $home :: $path -> $resolved" ;;
 	esac
+
+	# Exactly one component below the base. Without this, ".../apps/x/",
+	# ".../apps//x" and ".../apps/./x" are all accepted and all store a
+	# different string for the same directory, so a value written into a unit
+	# file would not compare equal to the same application's root read back
+	# later. A nested path also failed with a confusing "unable to create"
+	# from mkdir rather than saying what was wrong.
+	if ! [[ "${resolved#"$resolved_home"/}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+		check_result "$E_INVALID" "app root must be a single directory directly under $home :: $path"
+	fi
 }
 
 # Resolve an application root to its real path, following symlinks in any
@@ -304,9 +314,13 @@ app_root_create() {
 }
 
 # Re-check an application root at the moment it is used, and echo the resolved
-# path. Callers must use what this echoes, never the value they passed in:
-# handing the raw path to systemd or to a command re-opens the race this
-# closes.
+# path. Callers must use what this echoes, never the value they passed in.
+#
+# Two reasons. It is the resolved path, so it does not traverse anything the
+# caller supplied. And it is canonical: ".../apps/x/", ".../apps//x" and
+# ".../apps/./x" all name the same directory, so storing the raw value would
+# mean the same application's root not comparing equal to itself later, and a
+# unit file disagreeing with the registry.
 #
 # Call it immediately before use, not once at the start of a long command.
 app_root_assert_safe() {

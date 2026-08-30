@@ -355,6 +355,34 @@ function write_app() {
 	rm -rf /srv/symtarget
 }
 
+@test "AppRegistry: The app root must be one component under the base" {
+	base="/home/$user/.ivarse/apps"
+	# Nested is refused: it would need mkdir -p and gives no clearer meaning.
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '$base/a/b' '$user'"
+	assert_failure $E_INVALID
+	assert_output --partial 'single directory'
+	# The base itself is not an app root.
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '$base' '$user'"
+	assert_failure $E_FORBIDEN
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid '$base/good-app_1' '$user'"
+	assert_success
+}
+
+@test "AppRegistry: Non-canonical spellings resolve to one canonical path" {
+	# ".../apps/x/", ".../apps//x" and ".../apps/./x" all name the same
+	# directory. They are accepted, and assert_safe echoes the canonical form,
+	# which is what callers must store - storing the raw value would mean the
+	# same application's root not comparing equal to itself later.
+	runuser -u "$user" -- true
+	mkdir -p "/home/$user/.ivarse/apps/canon"
+	chown "$user:$user" "/home/$user/.ivarse/apps/canon"
+	for spelling in "/home/$user/.ivarse/apps/canon/" "/home/$user/.ivarse/apps//canon" "/home/$user/.ivarse/apps/./canon"; do
+		run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' \"\$1\"" _ "$spelling"
+		assert_success
+		assert_output "/home/$user/.ivarse/apps/canon"
+	done
+}
+
 @test "AppRegistry: An app name is not usable as a search pattern" {
 	# Unvalidated, a name like '.*' matched every record at once and the parser
 	# merged them into a single malformed object while exiting 0.
