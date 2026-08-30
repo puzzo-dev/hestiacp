@@ -263,6 +263,22 @@ is a client of it.
 - **Acceptance:** a real upstream release merges with conflicts only in files
   listed in `TOUCHPOINTS.md`.
 
+### F1a · Verify the nodejs.org release signature
+- **Status:** TODO — backlog, not on the Phase 1 critical path
+- **Depends on:** F1
+- **Tier:** 0
+- **Scope:** F1 fetches `SHASUMS256.txt` over TLS and verifies the tarball
+  against it, but does not verify that file's GPG signature
+  (`SHASUMS256.txt.sig`) against the Node release keys. A mirror serving both a
+  bad checksum file and a matching bad tarball would pass. This matters more
+  than it looks because `NODE_DIST_MIRROR` is overridable.
+- **Files:** `bin/v-add-sys-nodejs`, `func/node.sh`
+- **Acceptance:** a tarball whose `SHASUMS256.txt` carries an invalid or absent
+  signature is refused.
+- **Why not now:** TLS plus checksum is a reasonable bar, and Phase 1 is about
+  getting the sites off Cloudflare Workers. Raising it is worth doing before the
+  panel is exposed to customers who are not you.
+
 ---
 
 ## Migration milestones
