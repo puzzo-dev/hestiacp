@@ -151,7 +151,7 @@ is_app_port_format_valid() {
 # path to mkdir, chown and systemd, never the path as supplied. Resolving here
 # and then using the raw value elsewhere reintroduces the same hole.
 is_app_root_format_valid() {
-	local path="$1" user="$2" home resolved
+	local path="$1" user="$2" home resolved resolved_home
 	case "$path" in
 		/*) ;;
 		*) check_result "$E_INVALID" "app root must be an absolute path :: $path" ;;
@@ -160,18 +160,42 @@ is_app_root_format_valid() {
 		*..*) check_result "$E_INVALID" "app root must not contain '..' :: $path" ;;
 	esac
 
+	# Restrict to characters a real application root needs. This is not
+	# tidiness: the path is written into a systemd unit as WorkingDirectory,
+	# and a newline there lets a caller append further directives -
+	#
+	#   WorkingDirectory=/home/u/app
+	#   ExecStartPost=/bin/id
+	#   User=root
+	#
+	# systemd honours the last User=, so a newline in this value is arbitrary
+	# execution as root. The same value also reaches shell commands and nginx
+	# configuration, so quote characters and shell metacharacters are refused
+	# for the same reason.
+	if [ ${#path} -gt 4096 ]; then
+		check_result "$E_INVALID" "app root is too long"
+	fi
+	if ! [[ "$path" =~ ^[A-Za-z0-9/._-]+$ ]]; then
+		check_result "$E_INVALID" "app root may only contain letters, digits and / . _ - :: $path"
+	fi
+
 	home="$HOMEDIR/$user"
 	case "$path" in
 		"$home"/*) ;;
 		*) check_result "$E_FORBIDEN" "app root must be inside $home :: $path" ;;
 	esac
 
+	# Compare resolved against resolved. The home directory itself may sit
+	# behind a symlink - homes on mounted storage are often /home -> /srv/home -
+	# and comparing a resolved path against an unresolved home would reject
+	# every legitimate application root on such a host.
 	resolved="$(app_root_resolve "$path")"
-	if [ -z "$resolved" ]; then
+	resolved_home="$(app_root_resolve "$home")"
+	if [ -z "$resolved" ] || [ -z "$resolved_home" ]; then
 		check_result "$E_INVALID" "unable to resolve app root :: $path"
 	fi
 	case "$resolved" in
-		"$home"/*) ;;
+		"$resolved_home"/*) ;;
 		*) check_result "$E_FORBIDEN" "app root resolves outside $home :: $path -> $resolved" ;;
 	esac
 }

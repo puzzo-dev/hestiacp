@@ -142,6 +142,30 @@ function write_app() {
 	assert_output "ivarse-python-$user-frontend"
 }
 
+@test "AppRegistry: A newline in the app root is refused" {
+	# APP_ROOT becomes WorkingDirectory= in a systemd unit. A newline lets a
+	# caller append ExecStartPost= and User=root, and systemd honours the last
+	# User=, so this is arbitrary execution as root.
+	inject="$(printf '/home/%s/web/a/app\nExecStartPost=/bin/id\nUser=root' "$user")"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid \"\$1\" '$user'" _ "$inject"
+	assert_failure $E_INVALID
+	assert_output --partial 'may only contain'
+}
+
+@test "AppRegistry: Shell metacharacters in the app root are refused" {
+	for bad in 'a;id' 'a$(id)' 'a`id`' 'a b' 'a"q' "a'q" 'a|b' 'a&b'; do
+		run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid \"\$1\" '$user'" _ "/home/$user/web/$bad/app"
+		assert_failure $E_INVALID
+	done
+}
+
+@test "AppRegistry: Ordinary app roots are still accepted" {
+	for good in "app" "my-app_2" "web/site.com/app" "a.b-c_d/app"; do
+		run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; is_app_root_format_valid \"\$1\" '$user'" _ "/home/$user/$good"
+		assert_success
+	done
+}
+
 @test "AppRegistry: A symlinked app root that escapes the home is refused" {
 	# Without resolution this is a root privilege escalation: APP_ROOT is
 	# created and chowned by commands running as root, so a symlink to /etc
@@ -181,6 +205,18 @@ function write_app() {
 	run bash -c "source $HESTIA/func/app.sh; app_root_resolve '/home/$user/web/symsite/app'"
 	assert_output "/home/$user/realapp"
 	rm -f "/home/$user/web/symsite/app"
+}
+
+@test "AppRegistry: A symlinked home directory does not cause false rejections" {
+	# Homes on mounted storage are often reached through a symlink, e.g.
+	# /home -> /srv/home. Comparing a resolved path against an unresolved home
+	# would reject every legitimate application root on such a host.
+	mkdir -p "/srv/althome/$user/web/x"
+	ln -sfn /srv/althome /altohome
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; HOMEDIR=/altohome; is_app_root_format_valid '/altohome/$user/web/x/app' '$user'"
+	assert_success
+	rm -f /altohome
+	rm -rf /srv/althome
 }
 
 @test "AppRegistry: An app name is not usable as a search pattern" {
