@@ -43,6 +43,7 @@ Status is one of:
 
 | # | Finding | Owner | Why not now |
 |---|---|---|---|
+| D2 | Deleting a web domain leaves any application attached to it orphaned: the record survives pointing at a domain that no longer exists, and its port stays claimed. | **F11** | `v-delete-web-domain` belongs to the `hestia` package, so the add-on cannot hook it — that is the whole point of F11 and why it is marked *needs divert*. No privilege boundary is crossed and no data is lost; the effect is a leaked port and an application nginx no longer routes to. Until F11, `v-list-node-apps` still shows the record, so the orphan is visible rather than hidden. |
 | D1 | `%` is permitted in commands but is a systemd specifier prefix. `ExecStart=npm start %n` expands, and an unknown specifier makes the unit fail to start. | **F5** | Harmless as an argument. Nothing generates a unit file yet, so there is nothing to escape. F5 must write `%` as `%%` and carries this as an acceptance requirement with a test. **Not a security issue** — it breaks the unit, it does not cross a privilege boundary. |
 
 ---
