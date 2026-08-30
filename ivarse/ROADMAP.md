@@ -30,21 +30,59 @@ is a client of it.
 
 ## Phase 1 — Node hosting v1
 
-### F0 · Fork + build pipeline
-- **Status:** IN PROGRESS
+### F0 · Fork + build pipeline + test box
+- **Status:** DONE (in the F1 PR)
 - **Depends on:** —
 - **Tier:** 0
 - **Why first:** Nothing else can be verified until a deb can be built from this
   tree and installed on a throwaway Hestia. `research.txt` is explicit that we do
   not modify a production `/usr/local/hestia`.
-- **Scope:** Repo initialised with `origin` = fork, `upstream` = hestiacp/hestiacp.
-  Confirm `src/hst_autocompile.sh` builds `hestia` deb from this tree. Stand up a
-  test Hestia install separate from production. Document the build+deploy loop.
-- **Files:** `ivarse/BUILD.md` (new)
-- **Acceptance:** `./src/hst_autocompile.sh --hestia <branch>` produces a `.deb`;
-  installing it on the test box leaves the panel working and unchanged.
-- **Done:** repo + remotes wired, upstream diff confirmed empty.
-- **Open:** build not yet exercised; test host not yet chosen.
+- **Decided:** the test box is a Docker container, not a second WSL distro or a
+  VM. Upstream already ships `.github/docker/hestia-ci.Dockerfile` (Ubuntu 26.04,
+  `CMD ["/sbin/init"]`) and drives it from
+  `.github/workflows/pr-docker-bats.yml`, so this reuses the mechanism upstream
+  maintains. A Hestia install rewrites `/etc` heavily; a disposable container is
+  the right blast radius, and it resets in one command.
+- **Files:** `ivarse/testbox.sh` (new)
+- **Acceptance:** a deb builds from this tree, installs on a throwaway Hestia,
+  and the panel still works. ✅ verified — Hestia 1.10.4+ivarse1 built and
+  installed, `systemctl is-system-running` reports `running`.
+- **`testbox.sh up | install | verify | test | shell | logs | down | reset`.**
+  The repo mounts at `/hestiacp-git`, so edits are visible inside immediately.
+- **GitHub Actions is not available:** all four workflows are enabled and
+  trigger correctly, but every job fails in ~3s with *"the job was not started
+  because your account is locked due to a billing issue"*. Until that is
+  resolved on the account, the local box is the only test path.
+
+### F0b · Packaging identity — stop upstream replacing the fork
+- **Status:** DONE (in the F1 PR)
+- **Depends on:** F0
+- **Tier:** 1 (one line in `src/deb/hestia/control`), rest Tier 0
+- **Found by:** the first test-box install. Hestia installed and reported
+  success, but **none of the F1 files were present.** `apt-cache policy` showed
+  the running package had come from `apt.hestiacp.com`, not from the deb built
+  out of this tree.
+- **Root cause:** the fork's deb carried the *identical* version string to
+  upstream's (`1.10.4-1+ubuntu26.04`), so apt treated the two as
+  interchangeable. The stock installer also adds a nightly cron entry —
+  `41 4 * * * v-update-sys-hestia-all` — which runs `apt-get install hestia`
+  against `apt.hestiacp.com`. On a production box that would replace the entire
+  I-Varse installation at 04:41, unattended, removing every command, template
+  and helper this fork adds. The installer hides `dpkg` output, so it would have
+  looked like a clean install.
+- **Fix:** the fork builds as `1.10.4+ivarse1`, which outranks upstream's
+  same-numbered release and makes `apt-cache policy` tell the truth. Because a
+  future upstream `1.10.5` would still outrank it, `v-add-sys-ivarse-apt-pin`
+  installs an apt preference pinning the upstream package to priority `-1`.
+  Upstream changes are taken deliberately, by merging and rebuilding.
+- **Files:** `src/deb/hestia/control`, `install/common/apt/ivarse-hestia.pref`
+  (new), `bin/v-add-sys-ivarse-apt-pin` (new), `ivarse/testbox.sh`
+- **Acceptance:** running `v-update-sys-hestia-all` leaves the I-Varse
+  installation intact. ✅ verified — upstream sits at priority `-1`, the cron
+  command exits 0, and all four Node commands survive.
+- **Still to decide:** how the pin gets installed on a production box without
+  someone remembering to run it. Hestia's `/etc/hestiacp/hooks/post_install.sh`
+  is the documented hook and is the likely answer. Tracked in F14.
 
 ### F1 · Node runtime install + version management
 - **Status:** IN REVIEW — PR on `feat/f1-node-runtime`
@@ -71,9 +109,10 @@ is a client of it.
   application is pinned to cannot be deleted; deleting the default repoints it to
   the highest remaining major; installing a second runtime does not steal the
   default.
-- **Not yet verified:** behaviour as root (`chown`/`find -exec chmod` were
-  no-ops in the unprivileged test sandbox) and the bats suite, which needs a real
-  Hestia install. Both belong to F0's test box.
+- **Verified on a real installation:** ✅ all 21 bats cases pass as root on
+  Hestia 1.10.4+ivarse1 (Ubuntu 26.04, systemd PID 1), leaving no residue under
+  `/opt/ivarse/node`. This covers the root-only `chown`/`chmod` paths that the
+  unprivileged sandbox could not exercise.
 
 ### F2 · Application registry + data model
 - **Status:** TODO
@@ -280,7 +319,8 @@ is a client of it.
   untrusted signature is refused. ✅ verified, including the case that matters:
   a mirror serving a correct checksum and a *valid* signature made by a
   non-Node key is rejected. The pre-fix code installed that mirror's payload as
-  `node` and made it the default runtime.
+  `node` and made it the default runtime. Re-verified on the real installation as
+  part of the 21-case bats run.
 - **Known limitation:** the bundled keyring is a point-in-time snapshot of
   Node's release team. A release signed by a newly added member will fail until
   the keyring is refreshed. The error names the cause, and the override exists

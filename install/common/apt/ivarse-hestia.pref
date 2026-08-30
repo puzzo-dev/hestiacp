@@ -1,0 +1,16 @@
+# I-Varse Hestia — keep upstream packages from replacing this fork
+#
+# The nightly cron job installed by Hestia runs v-update-sys-hestia-all, which
+# runs "apt-get install hestia" against apt.hestiacp.com. Without this pin, the
+# next upstream release outranks the fork's version and apt silently replaces
+# the whole installation, removing everything under bin/, func/ and
+# install/ that this fork adds.
+#
+# Upstream changes are taken deliberately, by merging and rebuilding, never by
+# an unattended apt upgrade at 04:41.
+#
+# Installed by v-add-sys-ivarse-apt-pin.
+
+Package: hestia
+Pin: origin apt.hestiacp.com
+Pin-Priority: -1

@@ -1,0 +1,59 @@
+#!/bin/bash
+# info: protect the I-Varse fork from being replaced by upstream packages
+# options: NONE
+#
+# example: v-add-sys-ivarse-apt-pin
+#
+# Hestia installs a nightly cron job that runs v-update-sys-hestia-all, which
+# in turn runs "apt-get install hestia" against apt.hestiacp.com. This fork
+# ships its own hestia package, so without an apt pin the next upstream release
+# outranks it and apt replaces the entire installation unattended, removing
+# every command and template this fork adds.
+#
+# This installs a pin that stops apt from ever preferring the upstream package.
+# Upstream changes are taken deliberately, by merging and rebuilding.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+pin_source="$HESTIA_COMMON_DIR/apt/ivarse-hestia.pref"
+pin_target="/etc/apt/preferences.d/ivarse-hestia"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if [ ! -s "$pin_source" ]; then
+	check_result "$E_NOTEXIST" "apt pin template not found :: $pin_source"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+mkdir -p /etc/apt/preferences.d
+cp -f "$pin_source" "$pin_target"
+chown root:root "$pin_target"
+chmod 644 "$pin_target"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "system" "Info" "Plugins" "Upstream Hestia package pin installed."
+log_event "$OK" "$ARGUMENTS"
+
+exit
