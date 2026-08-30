@@ -339,7 +339,7 @@ is a client of it.
   and `iproute2` is a declared dependency.
 
 ### F4 · Application CRUD
-- **Status:** IN REVIEW — on `feat/f4-application-crud`
+- **Status:** DONE — merged (`10fadff`, `f41aefb`, `897437e`)
 - **Depends on:** F2, F2a, F2b, F2c, F3
 - **Packaging:** adds-only ✅
 - **Commands:** `v-add-node-app`, `v-delete-node-app`, `v-change-node-app-port`,
