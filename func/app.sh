@@ -206,6 +206,19 @@ app_root_resolve() {
 	realpath -m -- "$1" 2> /dev/null
 }
 
+# These come from Hestia's configuration and main.sh. If either is empty - for
+# instance because this file was sourced on its own - the home directory would
+# be computed as "/$user" and every containment check below would be answering
+# the wrong question. Refuse rather than answer it wrongly.
+app_env_required() {
+	if [ -z "$HOMEDIR" ]; then
+		check_result "$E_INVALID" "HOMEDIR is not set; source hestia.conf before func/app.sh"
+	fi
+	if [ -z "$BIN" ]; then
+		check_result "$E_INVALID" "BIN is not set; source func/main.sh before func/app.sh"
+	fi
+}
+
 # Create an application root.
 #
 # Delegates to Hestia's own v-add-fs-directory, which resolves the destination,
@@ -226,6 +239,14 @@ app_root_resolve() {
 # restricts this to the user's home.
 app_root_create() {
 	local user="$1" path="$2"
+
+	app_env_required
+
+	# Validate before creating, not after. v-add-fs-directory also permits
+	# /tmp, so checking only afterwards leaves a stray directory behind on a
+	# rejected call, and it would mean this primitive trusted its caller to
+	# have validated. It enforces its own contract instead.
+	is_app_root_format_valid "$path" "$user"
 
 	if ! "$BIN/v-add-fs-directory" "$user" "$path" > /dev/null 2>&1; then
 		check_result "$E_FORBIDEN" "unable to create app root as $user :: $path"
@@ -258,6 +279,7 @@ app_default_root() {
 app_root_assert_safe() {
 	local user="$1" path="$2" home resolved resolved_home
 
+	app_env_required
 	home="$HOMEDIR/$user"
 	resolved="$(app_root_resolve "$path")"
 	resolved_home="$(app_root_resolve "$home")"
