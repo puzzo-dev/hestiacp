@@ -223,7 +223,7 @@ is a client of it.
   add-on survived a real `1.10.4 -> 1.10.7` Hestia upgrade.
 
 ### F2b · Close the app-root TOCTOU
-- **Status:** IN PROGRESS — on `feat/f2b-toctou`
+- **Status:** DONE — merged (`7e38458`, `47d7564`)
 - **Depends on:** F2a
 - **Packaging:** adds-only ✅
 - **The race F2a left open:** validation passes on a real directory, the user
@@ -250,9 +250,16 @@ is a client of it.
   source has no business being. `private` is user-writable, inside Hestia's own
   structure, and not web-served.
 - **Files:** `func/app.sh`, `test/node-app.bats`
+- **Also fixed in review:** `app_root_create` created the directory *before*
+  validating, so a rejected call left a stray directory behind and the primitive
+  was trusting its caller to have validated the path format. It now enforces its
+  own contract. `HOMEDIR`/`BIN` are checked rather than assumed — without them
+  the home is computed as `/$user` and every containment check answers the wrong
+  question.
 - **Acceptance:** creating an app root through a swapped symlink fails and
   leaves `/etc` untouched; a legitimate root is created owned by the user;
-  `assert_safe` refuses an escaping path and a non-directory.
+  `assert_safe` refuses an escaping path and a non-directory. ✅ **37/37** on a
+  clean box, `nodejs` suite **22/22**.
 
 ### F3 · Port allocator
 - **Status:** TODO
