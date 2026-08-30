@@ -487,8 +487,12 @@ is a client of it.
   re-apply after upgrades; a systemd path unit watching `web.conf` for
   deletions; or contributing hook points upstream, which is the clean answer and
   the slow one. **Decide before starting.**
-- **Interim safety:** until this exists, deleting a Node-backed web domain
-  leaks a systemd unit and a port. Document it rather than pretend otherwise.
+- **Interim behaviour, measured in F4:** deleting a web domain leaves the
+  application record in place, pointing at a domain that no longer exists, with
+  its port still claimed. No privilege boundary is crossed and nothing is lost;
+  the effect is a leaked port and an application nginx no longer routes to. It
+  stays visible in `v-list-node-apps` rather than disappearing silently.
+  Tracked as **D2** in `ivarse/FINDINGS.md`.
 
 ### F12 · Backup and restore
 - **Status:** TODO
