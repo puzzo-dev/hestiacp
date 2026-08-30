@@ -153,6 +153,18 @@ Re-verify before relying on any of these; do not trust general Hestia knowledge.
 - php-fpm's port scanner in `v-change-web-domain-backend-tpl` starts at 9000 and
   is php-fpm-specific. Node needs its own allocator over a separate range.
 
+## Tag every finding
+
+`ivarse/FINDINGS.md` is the register of every security or correctness hole
+found, each tagged **FIXED**, **OPEN**, **DEFERRED** or **ACCEPTED**, with the
+commit that closed it.
+
+Whenever a review turns something up, add it there in the same change, and say
+plainly in the report whether it is fixed or not. Never describe a problem
+without stating its status — "noted", "worth knowing" and "a limitation" are not
+statuses. If it is deferred, name the item that owns it and why waiting is
+acceptable.
+
 ## Two standing hazards
 
 Both were found by review and both bite again in F4, F5 and F7.
