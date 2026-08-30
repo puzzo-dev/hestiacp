@@ -48,3 +48,16 @@ web/src/vendor/
 # Node
 **/node_modules/
 npm-debug.log
+
+# I-Varse: local AI-agent tooling, not part of the distribution
+/.agents/
+/.codex/
+/.cursor/
+/.gemini/
+/.kiro/
+/.opencode/
+/.pi/
+/.trae/
+/.trae-cn/
+/.claude/skills/*
+!/.claude/skills/ivarse-hestia/
