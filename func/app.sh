@@ -134,17 +134,24 @@ is_app_port_format_valid() {
 	fi
 }
 
-# The application root must be inside the owning user's home directory.
+# The application root must be inside the owning user's home directory, both as
+# written and after symlinks are resolved.
 #
-# This checks the path as written. It does not resolve symlinks, because the
-# directory need not exist yet at the point an application is registered.
-# Whoever creates or uses the directory must re-check the resolved path, or a
-# symlink planted inside the home could still point outside it.
-# It ends up as a systemd WorkingDirectory and as the target of a build run as
-# that user, so a path escaping the home directory would cross the isolation
-# boundary Hestia maintains between users.
+# Resolution is not optional hardening. APP_ROOT is created and chowned by
+# commands that run as root, so a symlink is a direct privilege escalation:
+#
+#   ln -s /etc /home/alice/web/site/app
+#   chown -R alice:alice /home/alice/web/site/app   # run as root
+#   -> /etc is now owned by alice
+#
+# realpath -m is used because the directory need not exist yet; it resolves the
+# components that do exist and leaves the rest lexically normalised.
+#
+# Callers that create or write through this path must still pass the *resolved*
+# path to mkdir, chown and systemd, never the path as supplied. Resolving here
+# and then using the raw value elsewhere reintroduces the same hole.
 is_app_root_format_valid() {
-	local path="$1" user="$2" home
+	local path="$1" user="$2" home resolved
 	case "$path" in
 		/*) ;;
 		*) check_result "$E_INVALID" "app root must be an absolute path :: $path" ;;
@@ -152,11 +159,27 @@ is_app_root_format_valid() {
 	case "$path" in
 		*..*) check_result "$E_INVALID" "app root must not contain '..' :: $path" ;;
 	esac
+
 	home="$HOMEDIR/$user"
 	case "$path" in
 		"$home"/*) ;;
 		*) check_result "$E_FORBIDEN" "app root must be inside $home :: $path" ;;
 	esac
+
+	resolved="$(app_root_resolve "$path")"
+	if [ -z "$resolved" ]; then
+		check_result "$E_INVALID" "unable to resolve app root :: $path"
+	fi
+	case "$resolved" in
+		"$home"/*) ;;
+		*) check_result "$E_FORBIDEN" "app root resolves outside $home :: $path -> $resolved" ;;
+	esac
+}
+
+# Resolve an application root to its real path, following symlinks in any
+# component that already exists. Echoes nothing if the path cannot be resolved.
+app_root_resolve() {
+	realpath -m -- "$1" 2> /dev/null
 }
 
 # Commands become a systemd ExecStart and are run as the owning user. Reject

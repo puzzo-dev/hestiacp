@@ -158,6 +158,32 @@ is a client of it.
   they arrive from panel users, so quoting them safely is a losing game
   compared with refusing them.
 
+### F2a · Resolve the application root before trusting it
+- **Status:** IN REVIEW — PR pending
+- **Depends on:** F2
+- **Packaging:** adds-only ✅
+- **Why:** not hardening — a **root privilege escalation**, demonstrated on the
+  test box. `is_app_root_format_valid` checked the path as written, so a symlink
+  passed:
+  ```
+  ln -s /etc /home/alice/web/site/app     # as the user
+  chown -R alice:alice .../site/app       # as root, from F4
+  -> /etc owner before: root
+  -> /etc owner after:  alice
+  ```
+  From there `/etc/sudoers.d/` and `/etc/passwd` are writable and the box is gone.
+- **Fix:** the validator now resolves with `realpath -m` — which works on paths
+  that do not exist yet — and requires the **resolved** path to be inside the
+  owning user's home. A symlink staying inside the home is still allowed.
+- **Binding requirement on every later item:** commands that create or write
+  through `APP_ROOT` must use the **resolved** path for `mkdir`, `chown` and
+  systemd. Resolving here and then using the raw value elsewhere reintroduces
+  the identical hole. This applies to F4, F5 and F7.
+- **Files:** `func/app.sh`, `test/node-app.bats`
+- **Acceptance:** a symlinked root escaping the home is refused; one pointing at
+  another user is refused; one staying inside the home is allowed; a path that
+  does not exist yet still validates.
+
 ### F3 · Port allocator
 - **Status:** TODO
 - **Depends on:** F2
@@ -188,9 +214,17 @@ is a client of it.
   directly — `func/main.sh` belongs to `hestia` and cannot be shipped.
 - **Acceptance:** add → list → change → delete leaves no unit file, no nginx
   include, no registry line, and no leaked port.
-- **Security:** start/build commands are attacker-controlled input from panel
-  users that become root-generated systemd config. Validate against an allowlist
-  shape; never interpolate raw into a shell string.
+- **Security — carried forward from F2a, not optional:**
+  - use the **resolved** `APP_ROOT` (`app_root_resolve`) for every `mkdir`,
+    `chown` and path written into config. Using the raw value restores the
+    root escalation F2a closed.
+  - better still, create the directory **as the user** (`runuser -u "$user"`)
+    rather than as root, so a symlink cannot be leveraged even if a check is
+    missed.
+  - start/build commands are attacker-controlled input from panel users that
+    become root-generated systemd config. They are already refused if they
+    contain shell metacharacters or newlines; keep that check on every path
+    that accepts them.
 
 ### F5 · systemd unit generation + lifecycle
 - **Status:** TODO
@@ -207,6 +241,15 @@ is a client of it.
   `bin/v-rebuild-node-app`
 - **Acceptance:** app survives `systemctl restart`, comes back after host reboot,
   and `ProtectSystem=strict` does not break Next.js's `.next/cache` writes.
+- **Required when generating the unit — both carried from F2/F2a:**
+  - **escape `%` as `%%`.** systemd treats `%` as a specifier prefix, so
+    `npm start %n` would expand to the unit name and an unknown specifier makes
+    the unit fail to start. `%` is allowed in commands because it is harmless as
+    an argument; it is the unit writer's job to escape it. Needs a test with a
+    literal `%` in the start command.
+  - `WorkingDirectory` and `ReadWritePaths` must use the **resolved**
+    `APP_ROOT`. `ReadWritePaths` on an unresolved symlink would hand systemd a
+    path outside the user's home to make writable.
 - **Reference:** `src/deb/web-terminal/hestia-web-terminal.service` — same shape,
   already shipping.
 
@@ -244,6 +287,8 @@ is a client of it.
   with the error visible in the build log and leaves the previous build serving.
 - **Do not:** add `node`/`npm` to `v-run-cli-cmd`'s whitelist. That grants every
   panel user arbitrary `npm` execution. Fixed argv here instead.
+- **Required:** run the build in the **resolved** `APP_ROOT`, and as the owning
+  user. A build is the easiest place to follow a planted symlink by accident.
 
 ### F8 · Environment variables
 - **Status:** TODO
