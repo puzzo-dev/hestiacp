@@ -1,0 +1,85 @@
+#!/bin/bash
+# info: delete node application
+# options: USER APP [DELETE_FILES]
+#
+# example: v-delete-node-app admin frontend
+# example: v-delete-node-app admin frontend yes
+#
+# This function removes a Node.js application. Application files are kept
+# unless DELETE_FILES is 'yes', because losing a deployment to a mistyped
+# command is worse than leaving a directory behind.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+app=$2
+delete_files=${3-no}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/node.sh
+source $HESTIA/func/node.sh
+# shellcheck source=/usr/local/hestia/func/app.sh
+source $HESTIA/func/app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '2' "$#" 'USER APP [DELETE_FILES]'
+is_format_valid 'user'
+is_object_valid 'user' 'USER' "$user"
+is_app_name_format_valid "$app"
+is_boolean_format_valid "$delete_files" 'delete_files'
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if ! app_exists "$user" "$app"; then
+	check_result "$E_NOTEXIST" "application $app doesn't exist"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+object=$(grep -m 1 "NAME='$app'" "$(app_conf "$user")")
+parse_object_kv_list "$object"
+
+# Stop and forget the service before the record goes, or the unit is left
+# running with nothing describing it.
+if [ -n "$SERVICE_NAME" ] && [ -f "$NODE_SYSTEMD_DIR/$SERVICE_NAME.service" ]; then
+	systemctl stop "$SERVICE_NAME" > /dev/null 2>&1
+	systemctl disable "$SERVICE_NAME" > /dev/null 2>&1
+	rm -f "$NODE_SYSTEMD_DIR/$SERVICE_NAME.service"
+	systemctl daemon-reload > /dev/null 2>&1
+fi
+
+if [ "$delete_files" = 'yes' ] && [ -n "$APP_ROOT" ]; then
+	# Re-check rather than trusting the stored value: this is a recursive
+	# delete running as root, and the containment check is what stops it
+	# following anything out of the managed base.
+	target=$(app_root_assert_safe "$user" "$APP_ROOT")
+	rm -rf "$target"
+fi
+
+# Deleting the application from the registry
+sed -i "/NAME='$app'/ d" "$(app_conf "$user")"
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "$user" "Info" "Node" "Deleted Node.js application (Name: $app)."
+log_event "$OK" "$ARGUMENTS"
+
+exit

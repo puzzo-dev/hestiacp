@@ -21,6 +21,12 @@ function setup() {
 }
 
 @test "Nodejs: Install a runtime" {
+	# Idempotent: another suite may have installed these, and a run that
+	# aborts before the delete tests leaves them behind. Without this the
+	# first run after either fails with "already installed" and the second
+	# passes, which is worse than failing consistently.
+	v-delete-sys-nodejs "$primary" > /dev/null 2>&1 || true
+	v-delete-sys-nodejs "$secondary" > /dev/null 2>&1 || true
 	run v-add-sys-nodejs $primary
 	assert_success
 	assert_file_executable "$NODE_ROOT/$primary/bin/node"

@@ -1,0 +1,143 @@
+#!/bin/bash
+# info: add node application
+# options: USER DOMAIN APP [VERSION] [PORT] [PACKAGE_MANAGER] [START_COMMAND] [BUILD_COMMAND]
+#
+# example: v-add-node-app admin ivarseltd.com frontend
+# example: v-add-node-app admin ivarseltd.com api 22 30005 pnpm 'pnpm start' 'pnpm build'
+#
+# This function registers a Node.js application against an existing web domain.
+# It does not start the application: nothing is supervised until a service is
+# generated for it.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+domain=$2
+app=$3
+runtime_version=$4
+app_port=$5
+package_manager=${6-npm}
+start_command=${7-npm start}
+build_command=${8-npm run build}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/node.sh
+source $HESTIA/func/node.sh
+# shellcheck source=/usr/local/hestia/func/app.sh
+source $HESTIA/func/app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# Release the allocation lock however this exits, so a failure part way
+# through does not block every later creation until the process is reaped.
+cleanup() {
+	app_port_lock_release
+}
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '3' "$#" 'USER DOMAIN APP [VERSION] [PORT] [PACKAGE_MANAGER] [START_COMMAND] [BUILD_COMMAND]'
+is_format_valid 'user' 'domain'
+is_object_valid 'user' 'USER' "$user"
+is_object_unsuspended 'user' 'USER' "$user"
+
+# The application is attached to a web domain, and that domain must be one the
+# user owns. is_object_valid reads only this user's records, so a domain
+# belonging to someone else is not found rather than silently accepted.
+is_object_valid 'web' 'DOMAIN' "$domain"
+
+is_app_name_format_valid "$app"
+is_app_pm_format_valid "$package_manager"
+is_app_command_format_valid "$start_command" 'start command'
+if [ -n "$build_command" ]; then
+	is_app_command_format_valid "$build_command" 'build command'
+fi
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if app_exists "$user" "$app"; then
+	check_result "$E_EXISTS" "application $app exists"
+fi
+
+# Fall back to the host's default runtime when no version is asked for
+if [ -z "$runtime_version" ]; then
+	runtime_version=$(node_runtime_default)
+	if [ -z "$runtime_version" ]; then
+		check_result "$E_NOTEXIST" "no Node.js runtime installed; run v-add-sys-nodejs first"
+	fi
+fi
+is_node_major_format_valid "$runtime_version"
+if ! node_runtime_exists "$runtime_version"; then
+	check_result "$E_NOTEXIST" "Node.js $runtime_version is not installed"
+fi
+
+if [ -n "$app_port" ]; then
+	is_app_port_format_valid "$app_port"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+# Everything from choosing a port to writing the record that claims it happens
+# under one lock. Releasing in between would let a concurrent creation pick the
+# same port, because neither record exists yet.
+app_port_lock_acquire
+trap cleanup EXIT
+
+if [ -n "$app_port" ]; then
+	if ! is_app_port_available "$app_port"; then
+		check_result "$E_EXISTS" "port $app_port is already in use"
+	fi
+else
+	app_port=$(get_next_app_port)
+fi
+
+app_root=$(app_default_root "$user" "$app")
+app_root_create "$user" "$app_root"
+
+# Store the resolved path, not the one just built. It is canonical, so the same
+# application's root compares equal to itself later and a generated service
+# file cannot disagree with the registry.
+app_root=$(app_root_assert_safe "$user" "$app_root")
+
+service_name=$(app_service_name "$user" "$app" 'node')
+
+# Generating timestamp
+time_n_date=$(date +'%T %F')
+time=$(echo "$time_n_date" | cut -f 1 -d \ )
+date=$(echo "$time_n_date" | cut -f 2 -d \ )
+
+conf="$(app_conf "$user")"
+if [ ! -f "$conf" ]; then
+	touch "$conf"
+	chown root:"$user" "$conf"
+	chmod 660 "$conf"
+fi
+
+echo "NAME='$app' DOMAIN='$domain' RUNTIME='node' RUNTIME_VERSION='$runtime_version'\
+ APP_ROOT='$app_root' PORT='$app_port' PACKAGE_MANAGER='$package_manager'\
+ BUILD_COMMAND='$build_command' START_COMMAND='$start_command'\
+ SERVICE_NAME='$service_name' SUSPENDED='no' TIME='$time' DATE='$date'" >> "$conf"
+
+app_port_lock_release
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "$user" "Info" "Node" "Added Node.js application (Name: $app, Domain: $domain, Port: $app_port)."
+log_event "$OK" "$ARGUMENTS"
+
+exit

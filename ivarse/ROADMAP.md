@@ -339,32 +339,30 @@ is a client of it.
   and `iproute2` is a declared dependency.
 
 ### F4 · Application CRUD
-- **Status:** TODO
-- **Depends on:** F2, F3
+- **Status:** IN REVIEW — on `feat/f4-application-crud`
+- **Depends on:** F2, F2a, F2b, F2c, F3
 - **Packaging:** adds-only ✅
-- **Scope:** `v-add-node-app` (validate, allocate port, create `APP_ROOT`, write
-  registry, generate unit + nginx include, do **not** auto-start),
-  `v-delete-node-app` (stop, disable, remove unit, remove includes, free port,
-  remove record), `v-change-node-app-*` for each mutable field.
-  New `is_format_valid` cases for `app_name`, `runtime`, `runtime_version`,
-  `app_port`, `package_manager`, `start_command`, `build_command` — the command
-  fields need careful validation, they end up in a systemd `ExecStart`.
-- **Files:** `bin/v-add-node-app`, `bin/v-delete-node-app`,
-  `bin/v-change-node-app-*`. Validators live in `func/node.sh` and are called
-  directly — `func/main.sh` belongs to `hestia` and cannot be shipped.
-- **Acceptance:** add → list → change → delete leaves no unit file, no nginx
-  include, no registry line, and no leaked port.
-- **Security — carried forward from F2a, not optional:**
-  - use the **resolved** `APP_ROOT` (`app_root_resolve`) for every `mkdir`,
-    `chown` and path written into config. Using the raw value restores the
-    root escalation F2a closed.
-  - better still, create the directory **as the user** (`runuser -u "$user"`)
-    rather than as root, so a symlink cannot be leveraged even if a check is
-    missed.
-  - start/build commands are attacker-controlled input from panel users that
-    become root-generated systemd config. They are already refused if they
-    contain shell metacharacters or newlines; keep that check on every path
-    that accepts them.
+- **Commands:** `v-add-node-app`, `v-delete-node-app`, `v-change-node-app-port`,
+  `v-change-node-app-runtime`, `v-change-node-app-command`
+- **First consumer of every primitive built so far, and it uses them rather
+  than working around them:**
+  - the app root comes from `app_default_root` and is created by
+    `app_root_create`, so it lands in the managed base with `root:root` parents
+    and a `user:user` leaf
+  - the value stored is what `app_root_assert_safe` **echoes**, so it is
+    resolved and canonical
+  - the port lock is held across allocating **and** writing the record, and
+    released by a trap so a failure part way through cannot wedge later creations
+- **Deletion keeps files by default.** `DELETE_FILES=yes` is opt-in: losing a
+  deployment to a mistyped command is worse than leaving a directory behind.
+  Re-adding an application reuses the existing root, which is what makes a
+  redeploy work.
+- **Does not start anything.** Nothing is supervised until F5 generates a unit.
+- **Acceptance:** add → list → change → delete leaves no record and no leaked
+  port. ✅ **25/25**, plus cross-user isolation and two concurrent adds by
+  different users receiving distinct ports.
+- **D1 continuity:** a `%` in a command is stored intact, verified, so F5 has
+  something to escape as `%%` when it writes the unit.
 
 ### F5 · systemd unit generation + lifecycle
 - **Status:** TODO
