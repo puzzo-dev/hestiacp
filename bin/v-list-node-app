@@ -84,6 +84,7 @@ csv_list() {
 check_args '2' "$#" 'USER APP [FORMAT]'
 is_format_valid 'user' 'format'
 is_object_valid 'user' 'USER' "$user"
+is_app_name_format_valid "$app"
 
 if ! app_exists "$user" "$app"; then
 	check_result "$E_NOTEXIST" "application $app doesn't exist"
@@ -93,7 +94,7 @@ fi
 #                       Action                             #
 #----------------------------------------------------------#
 
-object=$(grep "NAME='$app'" "$(app_conf "$user")")
+object=$(grep -m 1 "NAME='$app'" "$(app_conf "$user")")
 parse_object_kv_list "$object"
 STATUS=$(app_status "$SERVICE_NAME")
 AUTOSTART=$(app_autostart "$SERVICE_NAME")

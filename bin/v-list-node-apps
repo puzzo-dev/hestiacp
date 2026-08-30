@@ -86,7 +86,7 @@ csv_list() {
 # Read one application record and derive its live state
 load_app() {
 	local object
-	object=$(grep "NAME='$1'" "$(app_conf "$user")")
+	object=$(grep -m 1 "NAME='$1'" "$(app_conf "$user")")
 	parse_object_kv_list "$object"
 	STATUS=$(app_status "$SERVICE_NAME")
 	AUTOSTART=$(app_autostart "$SERVICE_NAME")
