@@ -142,7 +142,27 @@ function write_app() {
 	assert_output "ivarse-python-$user-frontend"
 }
 
+@test "AppRegistry: An app name is not usable as a search pattern" {
+	# Unvalidated, a name like '.*' matched every record at once and the parser
+	# merged them into a single malformed object while exiting 0.
+	write_app "alpha" "alpha.$domain" 30003
+	write_app "beta" "beta.$domain" 30004
+	run v-list-node-app "$user" '.*'
+	assert_failure $E_INVALID
+	assert_output --partial 'invalid app name format'
+	refute_output --partial 'Duplicate key'
+}
+
+@test "AppRegistry: A duplicated record does not merge into one object" {
+	write_app "alpha" "dupe.$domain" 30005
+	run v-list-node-app "$user" alpha plain
+	assert_success
+	refute_output --partial 'Duplicate key'
+	assert_output --partial "alpha.$domain"
+}
+
 @test "AppRegistry: Remove the test user" {
 	run v-delete-user "$user"
 	assert_success
 }
+

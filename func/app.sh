@@ -134,7 +134,12 @@ is_app_port_format_valid() {
 	fi
 }
 
-# The application root must resolve inside the owning user's home directory.
+# The application root must be inside the owning user's home directory.
+#
+# This checks the path as written. It does not resolve symlinks, because the
+# directory need not exist yet at the point an application is registered.
+# Whoever creates or uses the directory must re-check the resolved path, or a
+# symlink planted inside the home could still point outside it.
 # It ends up as a systemd WorkingDirectory and as the target of a build run as
 # that user, so a path escaping the home directory would cross the isolation
 # boundary Hestia maintains between users.
@@ -155,7 +160,13 @@ is_app_root_format_valid() {
 }
 
 # Commands become a systemd ExecStart and are run as the owning user. Reject
-# shell metacharacters rather than trying to quote them safely.
+# shell metacharacters rather than trying to quote them safely. Newlines are
+# included, since a newline would otherwise let a caller append further
+# directives such as ExecStartPost= to the generated unit.
+#
+# Note for whoever writes the unit file: '%' is still permitted here because it
+# is harmless as an argument, but systemd treats it as a specifier prefix, so it
+# must be written as '%%' in the unit.
 is_app_command_format_valid() {
 	if [ ${#1} -gt 512 ]; then
 		check_result "$E_INVALID" "$2 is too long"
