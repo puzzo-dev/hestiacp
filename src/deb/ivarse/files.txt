@@ -16,3 +16,6 @@ bin/v-delete-sys-nodejs
 bin/v-list-sys-nodejs
 bin/v-change-sys-nodejs-default
 func/node.sh
+
+# Node.js release signing keys, used to verify SHASUMS256.txt
+install/common/nodejs
