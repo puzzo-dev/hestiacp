@@ -262,7 +262,7 @@ is a client of it.
   clean box, `nodejs` suite **22/22**.
 
 ### F2c · Close the last three accepted findings
-- **Status:** IN PROGRESS — on `feat/f2c-close-accepted`
+- **Status:** DONE — merged (`53ec872`, `8c35109`, `7f9ce5b`)
 - **Depends on:** F2b
 - **Packaging:** adds-only ✅
 - **Why:** three findings had been marked *accepted* rather than fixed. Two were
