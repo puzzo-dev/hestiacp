@@ -172,6 +172,18 @@ as an argument, but a unit containing `ExecStart=npm start %n` expands it, and a
 unknown specifier makes the unit fail to start. Whoever writes a unit file
 escapes `%` as `%%`.
 
+## Never run destructive root commands on the test box
+
+Demonstrating a privilege-escalation bug by actually escalating on the shared
+test box leaves it broken. `chown -R root:root /etc` does not undo
+`chown -R someuser /etc` — group ownerships such as `/etc/bind` are lost, bind9
+stops starting, and `v-delete-user` then fails, which fails half the suite for
+reasons unrelated to the code under test. That has cost two full rebuilds.
+
+Prove such a bug in a throwaway container, or prove it by showing the check
+refuses the input. Never by performing the destructive operation on the box the
+suite runs on.
+
 ## Verification
 
 `ivarse/testbox.sh` runs a disposable **stock** Hestia in Docker:

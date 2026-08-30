@@ -215,13 +215,44 @@ is a client of it.
   resolved path was compared against an *unresolved* home, which rejected every
   legitimate root on a host where the home sits behind a symlink
   (`/home -> /srv/home`). Both sides are resolved now.
-- **Not closable here — TOCTOU.** The symlink can be swapped between validation
-  and use, which is why F4/F5/F7 must re-resolve at the point of use *and*
-  create the directory as the user rather than as root.
+- **TOCTOU:** closed in F2b, which provides `app_root_create` and
+  `app_root_assert_safe`. F4/F5/F7 must use those rather than hand-rolling.
 - **Acceptance:** a symlinked root escaping the home is refused; one pointing at
   another user is refused; one staying inside the home is allowed; a path that
   does not exist yet still validates. ✅ **27/27** on a clean box, and the
   add-on survived a real `1.10.4 -> 1.10.7` Hestia upgrade.
+
+### F2b · Close the app-root TOCTOU
+- **Status:** IN PROGRESS — on `feat/f2b-toctou`
+- **Depends on:** F2a
+- **Packaging:** adds-only ✅
+- **The race F2a left open:** validation passes on a real directory, the user
+  swaps it for a symlink — they own the parent — and the root operation follows
+  it. Demonstrated: `/etc` handed to an unprivileged user after a validated path.
+- **What does not fix it:** every `chown` variant follows such a symlink.
+  Measured on the test box with clean before/after baselines: `-h`, `-R -P`,
+  `-R --no-dereference` and plain `-R` all changed `/etc`'s owner. Choosing
+  better flags is not a mitigation.
+- **What does:** never apply root privilege through a path the user controls.
+  `app_root_create` delegates to Hestia's own `v-add-fs-directory`, which
+  resolves the destination, refuses anything outside the home, and creates it
+  through `setpriv` as that user. The kernel then decides, and anything
+  reachable that way the user could already reach unaided.
+- **`app_root_assert_safe`** re-resolves at the point of use and **echoes the
+  resolved path**. Callers must use what it echoes, never the value they passed
+  in — handing the raw path to systemd or to a command re-opens the race.
+- **Default app root changed to `/home/<user>/web/<domain>/private/<app>`.**
+  `research.txt` drew `app/` as a sibling of `public_html`, but Hestia creates
+  the domain directory as **551**: the user cannot write there, so the directory
+  would have to be created by root, which is the escalation above. Of the
+  standard per-domain directories only `public_html` and `private` are
+  user-writable, and `public_html` is the document root, where application
+  source has no business being. `private` is user-writable, inside Hestia's own
+  structure, and not web-served.
+- **Files:** `func/app.sh`, `test/node-app.bats`
+- **Acceptance:** creating an app root through a swapped symlink fails and
+  leaves `/etc` untouched; a legitimate root is created owned by the user;
+  `assert_safe` refuses an escaping path and a non-directory.
 
 ### F3 · Port allocator
 - **Status:** TODO

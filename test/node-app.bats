@@ -29,6 +29,9 @@ function write_app() {
 }
 
 @test "AppRegistry: Create a test user" {
+	# Idempotent: a run that aborts before the cleanup test would otherwise
+	# leave the user behind and fail every later run with "user exists".
+	v-delete-user "$user" > /dev/null 2>&1 || true
 	run v-add-user "$user" "Sup3rSecret!23" "$user@example.com" default "App Test"
 	assert_success
 	assert_dir_exist "$HESTIA/data/users/$user"
@@ -217,6 +220,64 @@ function write_app() {
 	assert_success
 	rm -f /altohome
 	rm -rf /srv/althome
+}
+
+@test "AppRegistry: Creating an app root needs a real web domain" {
+	run v-add-web-domain "$user" "$domain"
+	assert_success
+	assert_dir_exist "/home/$user/web/$domain/private"
+}
+
+@test "AppRegistry: The default app root lives under private/" {
+	# Not a sibling of public_html: Hestia makes the domain directory 551, so
+	# the user cannot create there and root doing it is the escalation vector.
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_default_root '$user' '$domain' 'frontend'"
+	assert_output "/home/$user/web/$domain/private/frontend"
+}
+
+@test "AppRegistry: Creating an app root works and is owned by the user" {
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_create '$user' '/home/$user/web/$domain/private/frontend'"
+	assert_success
+	assert_dir_exist "/home/$user/web/$domain/private/frontend"
+	run stat -c %U "/home/$user/web/$domain/private/frontend"
+	assert_output "$user"
+}
+
+@test "AppRegistry: Creating an app root does not follow a swapped symlink" {
+	# The race: validation passes on a real directory, the user swaps it for a
+	# symlink, and a root operation follows it. Every chown variant follows
+	# such a symlink, -h included, so the fix is to drop privileges rather
+	# than to pick better flags.
+	runuser -u "$user" -- ln -s /etc "/home/$user/web/$domain/private/evil"
+	etc_before="$(stat -c %U /etc)"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_create '$user' '/home/$user/web/$domain/private/evil/x'"
+	assert_failure
+	assert_equal "$(stat -c %U /etc)" "$etc_before"
+	rm -f "/home/$user/web/$domain/private/evil"
+}
+
+@test "AppRegistry: assert_safe echoes the resolved path for callers to use" {
+	runuser -u "$user" -- mkdir -p "/home/$user/web/$domain/private/real"
+	runuser -u "$user" -- ln -s "/home/$user/web/$domain/private/real" "/home/$user/web/$domain/private/link"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' '/home/$user/web/$domain/private/link'"
+	assert_success
+	assert_output "/home/$user/web/$domain/private/real"
+	rm -f "/home/$user/web/$domain/private/link"
+}
+
+@test "AppRegistry: assert_safe refuses a path that escapes at use time" {
+	runuser -u "$user" -- ln -s /etc "/home/$user/web/$domain/private/escape"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' '/home/$user/web/$domain/private/escape'"
+	assert_failure $E_FORBIDEN
+	rm -f "/home/$user/web/$domain/private/escape"
+}
+
+@test "AppRegistry: assert_safe refuses a path that is not a directory" {
+	runuser -u "$user" -- touch "/home/$user/web/$domain/private/afile"
+	run bash -c "source $HESTIA/func/main.sh; source $HESTIA/func/app.sh; app_root_assert_safe '$user' '/home/$user/web/$domain/private/afile'"
+	assert_failure $E_NOTEXIST
+	assert_output --partial 'not a directory'
+	rm -f "/home/$user/web/$domain/private/afile"
 }
 
 @test "AppRegistry: An app name is not usable as a search pattern" {

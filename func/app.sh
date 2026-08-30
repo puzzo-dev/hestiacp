@@ -206,6 +206,76 @@ app_root_resolve() {
 	realpath -m -- "$1" 2> /dev/null
 }
 
+# Create an application root.
+#
+# Delegates to Hestia's own v-add-fs-directory, which resolves the destination,
+# refuses anything outside the user's home, and creates it through setpriv as
+# that user. No root privilege is ever applied through a path the user
+# controls, which is what actually closes the race:
+#
+#   is_app_root_format_valid .../app   # passes, it is a real directory
+#   rmdir .../app && ln -s /etc .../app
+#   chown -R alice .../app             # as root -> /etc now belongs to alice
+#
+# Measured on the test box, every chown variant follows that symlink - -h,
+# -P and --no-dereference included - so choosing better flags is not a
+# mitigation. Dropping privileges is, because the kernel then decides, and
+# anything reachable that way the user could already reach unaided.
+#
+# v-add-fs-directory also permits /tmp; app_root_assert_safe afterwards
+# restricts this to the user's home.
+app_root_create() {
+	local user="$1" path="$2"
+
+	if ! "$BIN/v-add-fs-directory" "$user" "$path" > /dev/null 2>&1; then
+		check_result "$E_FORBIDEN" "unable to create app root as $user :: $path"
+	fi
+
+	app_root_assert_safe "$user" "$path" > /dev/null
+}
+
+# The default application root.
+#
+# Not a sibling of public_html, despite that being the obvious place. Hestia
+# creates the domain directory as 551, and although the user owns it they
+# cannot write to it, so the directory would have to be created by root - which
+# is the escalation above. public_html is writable but is the document root,
+# where application source has no business being.
+#
+# private/ is user-writable, inside Hestia's own per-domain structure, and is
+# not served by the web server.
+app_default_root() {
+	local user="$1" domain="$2" app="$3"
+	echo "$HOMEDIR/$user/web/$domain/private/$app"
+}
+
+# Re-check an application root at the moment it is used, and echo the resolved
+# path. Callers must use what this echoes, never the value they passed in:
+# handing the raw path to systemd or to a command re-opens the race this
+# closes.
+#
+# Call it immediately before use, not once at the start of a long command.
+app_root_assert_safe() {
+	local user="$1" path="$2" home resolved resolved_home
+
+	home="$HOMEDIR/$user"
+	resolved="$(app_root_resolve "$path")"
+	resolved_home="$(app_root_resolve "$home")"
+
+	if [ -z "$resolved" ] || [ -z "$resolved_home" ]; then
+		check_result "$E_INVALID" "unable to resolve app root :: $path"
+	fi
+	case "$resolved" in
+		"$resolved_home"/*) ;;
+		*) check_result "$E_FORBIDEN" "app root resolves outside $home :: $path -> $resolved" ;;
+	esac
+	if [ ! -d "$resolved" ]; then
+		check_result "$E_NOTEXIST" "app root is not a directory :: $resolved"
+	fi
+
+	echo "$resolved"
+}
+
 # Commands become a systemd ExecStart and are run as the owning user. Reject
 # shell metacharacters rather than trying to quote them safely. Newlines are
 # included, since a newline would otherwise let a caller append further
