@@ -1,0 +1,74 @@
+#!/bin/bash
+# info: delete a nodejs runtime
+# options: MAJOR
+#
+# example: v-delete-sys-nodejs 20
+#
+# This function removes a Node.js runtime installed under /opt/ivarse/node.
+# A runtime that applications are still pinned to is refused.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+node_major=$1
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/node.sh
+source $HESTIA/func/node.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'MAJOR'
+is_format_valid 'node_major'
+
+# Perform verification if read-only mode is enabled
+check_hestia_demo_mode
+
+if ! node_runtime_exists "$node_major"; then
+	check_result "$E_NOTEXIST" "Node.js $node_major is not installed"
+fi
+
+# Refuse while applications still depend on this runtime, otherwise their
+# services would fail on the next restart with no obvious cause
+in_use=$(node_runtime_in_use "$node_major")
+if [ -n "$in_use" ]; then
+	check_result "$E_INUSE" "Node.js $node_major is in use by: $(echo $in_use | tr '\n' ' ')"
+fi
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+node_full_version=$(node_runtime_version "$node_major")
+was_default=$(node_runtime_is_default "$node_major")
+
+rm -rf "${NODE_ROOT:?}/$node_major"
+
+# Repoint the default at the highest remaining runtime
+if [ "$was_default" = "yes" ]; then
+	rm -f "$NODE_ROOT/default"
+	remaining=$(node_runtime_list | tail -n 1)
+	if [ -n "$remaining" ]; then
+		ln -sfn "$remaining" "$NODE_ROOT/default"
+	fi
+fi
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+# Logging
+$BIN/v-log-action "system" "Info" "Plugins" "Node.js $node_full_version removed (major: $node_major)."
+log_event "$OK" "$ARGUMENTS"
+
+exit

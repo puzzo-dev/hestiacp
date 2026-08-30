@@ -47,21 +47,33 @@ is a client of it.
 - **Open:** build not yet exercised; test host not yet chosen.
 
 ### F1 · Node runtime install + version management
-- **Status:** TODO
+- **Status:** IN REVIEW — PR on `feat/f1-node-runtime`
 - **Depends on:** F0
-- **Tier:** 0
-- **Scope:** Install Node on the host and support more than one major version so
-  apps can pin `20.x` / `22.x` / `24.x`. Decide the mechanism (NodeSource per
-  major vs. a managed `/opt/ivarse/node/<ver>` tree) — `v-add-sys-web-terminal`
-  already does the NodeSource dance for a single version and is the reference.
-  Corepack for pnpm/yarn.
-- **Files:** `bin/v-add-sys-nodejs`, `bin/v-delete-sys-nodejs`,
-  `bin/v-list-sys-nodejs`
+- **Tier:** 0, plus one Tier 1 line in `func/main.sh`
+- **Decided:** official nodejs.org tarballs unpacked into `/opt/ivarse/node/<major>`,
+  root-owned, one directory per major. Chosen over NodeSource apt because apt can
+  hold only one Node major at a time, which would make per-app version pinning
+  impossible. Corepack is enabled per runtime so pnpm and yarn work without a
+  global install.
+- **Scope:** install, remove, list and default-selection for host Node runtimes.
+  Downloads are checksum-verified against the `SHASUMS256.txt` published with the
+  release, and unpacked in a staging directory so a failed install cannot leave a
+  half-written runtime behind.
+- **Files:** `func/node.sh` (new), `bin/v-add-sys-nodejs`,
+  `bin/v-delete-sys-nodejs`, `bin/v-list-sys-nodejs`,
+  `bin/v-change-sys-nodejs-default`, `test/nodejs.bats`,
+  `func/main.sh` (Tier 1: one `is_format_valid` case, marked `# IVARSE:`)
 - **Acceptance:** `v-list-sys-nodejs json` reports each installed major and its
-  absolute binary path; two majors coexist.
-- **Decision needed:** multi-version mechanism. NodeSource cannot install two
-  majors side by side from apt — this needs resolving before F5 writes an
-  `ExecStart` that pins a version.
+  absolute binary path; two majors coexist. ✅ verified — 22.23.2 and 24.20.0
+  installed side by side, both `node -v` correct, npm 10.9.8 present.
+- **Also verified:** duplicate install refused; tampered-mirror tarball rejected
+  on checksum with nothing installed and no staging left behind; a runtime an
+  application is pinned to cannot be deleted; deleting the default repoints it to
+  the highest remaining major; installing a second runtime does not steal the
+  default.
+- **Not yet verified:** behaviour as root (`chown`/`find -exec chmod` were
+  no-ops in the unprivileged test sandbox) and the bats suite, which needs a real
+  Hestia install. Both belong to F0's test box.
 
 ### F2 · Application registry + data model
 - **Status:** TODO
@@ -287,12 +299,13 @@ from Phase 1 by `research.txt`.
 
 Blocking questions, to resolve before the dependent item starts.
 
-1. **Multi-version Node mechanism** (blocks F1, then F5). NodeSource apt cannot
-   hold two majors at once.
+1. ~~**Multi-version Node mechanism**~~ — **resolved**: official tarballs into
+   `/opt/ivarse/node/<major>`. See F1.
 2. **App root layout** (blocks F4). `/home/user/web/<domain>/app/` alongside
    `public_html`, versus registering an arbitrary directory.
    `research.txt` leaves this open and flags it as needing care.
-3. **Target VPS web stack** (blocks F6). nginx-only or nginx+Apache decides which
-   template directory the Node templates go in.
+3. ~~**Target VPS web stack**~~ — **resolved**: nginx only. Node templates are
+   WEB templates in `install/deb/templates/web/nginx/php-fpm/`, no Apache bypass
+   needed.
 4. **One app per domain, or many?** Phase 1 needs one. The registry is app-keyed
    either way, so this only affects the nginx include and the UI.

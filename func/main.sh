@@ -1589,6 +1589,7 @@ is_format_valid() {
 				nat_ip) is_ip_format_valid "$arg" ;;
 				netmask) is_netmask_format_valid "$arg" 'netmask' ;;
 				newid) is_int_format_valid "$arg" 'id' ;;
+				node_major) is_node_major_format_valid "$arg" ;; # IVARSE: Node.js runtime major version
 				notice) is_notification_notice_valid "$arg" ;;
 				ns1) is_domain_format_valid "$arg" 'ns1' ;;
 				ns2) is_domain_format_valid "$arg" 'ns2' ;;
