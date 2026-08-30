@@ -1,0 +1,121 @@
+#!/bin/bash
+# info: list node applications
+# options: USER [FORMAT]
+#
+# example: v-list-node-apps admin json
+#
+# This function for obtaining the list of Node.js applications owned by a user.
+
+#----------------------------------------------------------#
+#                Variables & Functions                     #
+#----------------------------------------------------------#
+
+# Argument definition
+user=$1
+format=${2-shell}
+
+# Includes
+# shellcheck source=/etc/hestiacp/hestia.conf
+source /etc/hestiacp/hestia.conf
+# shellcheck source=/usr/local/hestia/func/main.sh
+source $HESTIA/func/main.sh
+# shellcheck source=/usr/local/hestia/func/node.sh
+source $HESTIA/func/node.sh
+# shellcheck source=/usr/local/hestia/func/app.sh
+source $HESTIA/func/app.sh
+# load config file
+source_conf "$HESTIA/conf/hestia.conf"
+
+# JSON list function
+json_list() {
+	local i=1 objects
+	objects=$(echo "$apps" | wc -w)
+	echo '{'
+	for app in $apps; do
+		load_app "$app"
+		echo -n '    "'$NAME'": {
+        "DOMAIN": "'$DOMAIN'",
+        "RUNTIME": "'$RUNTIME'",
+        "RUNTIME_VERSION": "'$RUNTIME_VERSION'",
+        "APP_ROOT": "'$APP_ROOT'",
+        "PORT": "'$PORT'",
+        "PACKAGE_MANAGER": "'$PACKAGE_MANAGER'",
+        "BUILD_COMMAND": "'$BUILD_COMMAND'",
+        "START_COMMAND": "'$START_COMMAND'",
+        "SERVICE_NAME": "'$SERVICE_NAME'",
+        "STATUS": "'$STATUS'",
+        "AUTOSTART": "'$AUTOSTART'",
+        "SUSPENDED": "'$SUSPENDED'",
+        "TIME": "'$TIME'",
+        "DATE": "'$DATE'"
+    }'
+		if [ "$i" -lt "$objects" ]; then echo ','; else echo; fi
+		((++i))
+	done
+	echo '}'
+}
+
+# SHELL list function
+shell_list() {
+	echo "NAME            DOMAIN                    RUNTIME  PORT   STATUS"
+	echo "----            ------                    -------  ----   ------"
+	for app in $apps; do
+		load_app "$app"
+		printf "%-15s %-25s %-8s %-6s %s\n" \
+			"$NAME" "$DOMAIN" "$RUNTIME/$RUNTIME_VERSION" "$PORT" "$STATUS"
+	done
+}
+
+# PLAIN list function
+plain_list() {
+	for app in $apps; do
+		load_app "$app"
+		echo -e "$NAME\t$DOMAIN\t$RUNTIME\t$RUNTIME_VERSION\t$APP_ROOT\t$PORT\t$PACKAGE_MANAGER\t$STATUS\t$SUSPENDED"
+	done
+}
+
+# CSV list function
+csv_list() {
+	echo "NAME,DOMAIN,RUNTIME,RUNTIME_VERSION,APP_ROOT,PORT,PACKAGE_MANAGER,STATUS,SUSPENDED"
+	for app in $apps; do
+		load_app "$app"
+		echo "$NAME,$DOMAIN,$RUNTIME,$RUNTIME_VERSION,$APP_ROOT,$PORT,$PACKAGE_MANAGER,$STATUS,$SUSPENDED"
+	done
+}
+
+# Read one application record and derive its live state
+load_app() {
+	local object
+	object=$(grep "NAME='$1'" "$(app_conf "$user")")
+	parse_object_kv_list "$object"
+	STATUS=$(app_status "$SERVICE_NAME")
+	AUTOSTART=$(app_autostart "$SERVICE_NAME")
+}
+
+#----------------------------------------------------------#
+#                    Verifications                         #
+#----------------------------------------------------------#
+
+check_args '1' "$#" 'USER [FORMAT]'
+is_format_valid 'user' 'format'
+is_object_valid 'user' 'USER' "$user"
+
+#----------------------------------------------------------#
+#                       Action                             #
+#----------------------------------------------------------#
+
+apps=$(app_list "$user" | grep -v '^$' | tr '\n' ' ')
+
+# Listing data
+case $format in
+	json) json_list ;;
+	plain) plain_list ;;
+	csv) csv_list ;;
+	shell) shell_list ;;
+esac
+
+#----------------------------------------------------------#
+#                       Hestia                             #
+#----------------------------------------------------------#
+
+exit
