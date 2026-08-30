@@ -63,6 +63,56 @@ function setup() {
 	assert_output --partial 'invalid default format'
 }
 
+@test "Nodejs: The release keyring is present and parseable" {
+	assert_file_exist "$HESTIA/install/common/nodejs/release-keys.asc"
+	run bash -c "gpg --dearmor < $HESTIA/install/common/nodejs/release-keys.asc | wc -c"
+	assert_success
+	[ "$output" -gt 0 ]
+}
+
+@test "Nodejs: Refuse to install without a release keyring" {
+	run env NODE_RELEASE_KEYRING=/nonexistent/keys.asc v-add-sys-nodejs 23
+	assert_failure $E_NOTEXIST
+	assert_output --partial 'release keyring not found'
+}
+
+@test "Nodejs: Refuse a release whose SHASUMS256.txt is not signed by a Node key" {
+	# A mirror that is internally consistent - correct checksum, valid
+	# signature - but signed by a key that is not a Node.js release key.
+	mirror="$BATS_TEST_TMPDIR/mirror"
+	export GNUPGHOME="$BATS_TEST_TMPDIR/gnupg"
+	mkdir -p "$mirror/latest-v31.x" "$mirror/v31.0.0" "$GNUPGHOME"
+	chmod 700 "$GNUPGHOME"
+	gpg --batch --quiet --passphrase '' --quick-gen-key "Not Node <evil@example.invalid>" default default never
+
+	mkdir -p "$BATS_TEST_TMPDIR/src/node-v31.0.0-linux-x64/bin"
+	printf '#!/bin/sh\necho pwned\n' > "$BATS_TEST_TMPDIR/src/node-v31.0.0-linux-x64/bin/node"
+	tar -cJf "$mirror/v31.0.0/node-v31.0.0-linux-x64.tar.xz" \
+		-C "$BATS_TEST_TMPDIR/src" node-v31.0.0-linux-x64
+	(cd "$mirror/v31.0.0" && sha256sum node-v31.0.0-linux-x64.tar.xz > SHASUMS256.txt)
+	cp "$mirror/v31.0.0/SHASUMS256.txt" "$mirror/latest-v31.x/SHASUMS256.txt"
+	gpg --batch --yes --detach-sign -o "$mirror/v31.0.0/SHASUMS256.txt.sig" \
+		"$mirror/v31.0.0/SHASUMS256.txt"
+	unset GNUPGHOME
+
+	run env NODE_DIST_MIRROR="file://$mirror" v-add-sys-nodejs 31
+	assert_failure $E_INVALID
+	assert_output --partial 'not signed by a known Node.js release key'
+	assert_dir_not_exist "$NODE_ROOT/31"
+}
+
+@test "Nodejs: Refuse a release with no signature at all" {
+	mirror="$BATS_TEST_TMPDIR/nosig"
+	mkdir -p "$mirror/latest-v31.x" "$mirror/v31.0.0"
+	echo "0  node-v31.0.0-linux-x64.tar.xz" > "$mirror/latest-v31.x/SHASUMS256.txt"
+	cp "$mirror/latest-v31.x/SHASUMS256.txt" "$mirror/v31.0.0/SHASUMS256.txt"
+
+	run env NODE_DIST_MIRROR="file://$mirror" v-add-sys-nodejs 31
+	assert_failure $E_CONNECT
+	assert_output --partial 'SHASUMS256.txt.sig'
+	assert_dir_not_exist "$NODE_ROOT/31"
+}
+
 @test "Nodejs: List reports the installed runtime" {
 	run v-list-sys-nodejs plain
 	assert_success

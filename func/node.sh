@@ -13,6 +13,12 @@ NODE_ROOT="/opt/ivarse/node"
 # Upstream distribution. Overridable for mirrors and air-gapped installs.
 NODE_DIST_MIRROR="${NODE_DIST_MIRROR:-https://nodejs.org/dist}"
 
+# Node.js release signing keys. Every release's SHASUMS256.txt is verified
+# against this keyring before its checksums are trusted. Overridable so an
+# administrator can supply a refreshed keyring when Node adds a release signer,
+# without waiting for a package update.
+NODE_RELEASE_KEYRING="${NODE_RELEASE_KEYRING:-$HESTIA_COMMON_DIR/nodejs/release-keys.asc}"
+
 # Prefix for the generated systemd units, and where they are written
 NODE_SERVICE_PREFIX="ivarse-node"
 NODE_SYSTEMD_DIR="/etc/systemd/system"
@@ -76,25 +82,53 @@ node_runtime_default() {
 	readlink "$NODE_ROOT/default" 2> /dev/null
 }
 
-# Resolve the latest full version and its tarball checksum for a major.
-# Sets node_full_version, node_tarball and node_sha256 in the caller's scope.
-# Returns non-zero if the major cannot be resolved upstream.
+# Discover which full version the "latest" pointer for a major resolves to.
+# Sets node_full_version and node_tarball in the caller's scope.
+#
+# The result is untrusted: it only decides which release directory to fetch.
+# The checksums that are actually used come from that release's signed
+# SHASUMS256.txt, read by node_runtime_checksum below.
 node_runtime_resolve() {
-	local major="$1" arch shasums line
+	local major="$1" arch listing
 	arch="$(node_runtime_arch)" || return 1
 
-	shasums="$(curl -fsSL --max-time 60 "$NODE_DIST_MIRROR/latest-v$major.x/SHASUMS256.txt" 2> /dev/null)"
-	[ -n "$shasums" ] || return 1
+	listing="$(curl -fsSL --max-time 60 "$NODE_DIST_MIRROR/latest-v$major.x/SHASUMS256.txt" 2> /dev/null)"
+	[ -n "$listing" ] || return 1
 
 	# One line per artifact: "<sha256>  node-v22.20.0-linux-x64.tar.xz"
-	line="$(echo "$shasums" | grep -E "  node-v${major}\.[0-9]+\.[0-9]+-linux-${arch}\.tar\.xz$" | head -n 1)"
-	[ -n "$line" ] || return 1
+	node_tarball="$(echo "$listing" \
+		| grep -oE "node-v${major}\.[0-9]+\.[0-9]+-linux-${arch}\.tar\.xz" \
+		| head -n 1)"
+	[ -n "$node_tarball" ] || return 1
 
-	node_sha256="$(echo "$line" | awk '{print $1}')"
-	node_tarball="$(echo "$line" | awk '{print $2}')"
 	node_full_version="$(echo "$node_tarball" | sed -E 's/^node-v([0-9.]+)-.*/\1/')"
+	[ -n "$node_full_version" ]
+}
 
-	[ -n "$node_sha256" ] && [ -n "$node_tarball" ] && [ -n "$node_full_version" ]
+# Verify the GPG signature on a release's SHASUMS256.txt against the Node.js
+# release keys. Returns 0 only for a good signature made by a bundled key.
+#
+# gpgv is used rather than gpg so that verification reads a fixed keyring and
+# cannot be influenced by, or write to, any keyring on the host.
+node_runtime_verify_shasums() {
+	local shasums="$1" signature="$2" keyring="$3"
+
+	[ -s "$signature" ] || return 1
+	[ -s "$NODE_RELEASE_KEYRING" ] || return 1
+
+	# gpgv needs a binary keyring; the bundled one is armored so it stays
+	# reviewable in the repository.
+	gpg --dearmor < "$NODE_RELEASE_KEYRING" > "$keyring" 2> /dev/null || return 1
+
+	gpgv --keyring "$keyring" "$signature" "$shasums" > /dev/null 2>&1
+}
+
+# Read the checksum for a tarball out of a verified SHASUMS256.txt.
+# Sets node_sha256 in the caller's scope.
+node_runtime_checksum() {
+	local shasums="$1" tarball="$2"
+	node_sha256="$(grep -E "  ${tarball}\$" "$shasums" | head -n 1 | awk '{print $1}')"
+	[ -n "$node_sha256" ]
 }
 
 # Applications currently pinned to a major version.

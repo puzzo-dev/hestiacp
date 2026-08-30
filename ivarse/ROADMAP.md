@@ -264,20 +264,27 @@ is a client of it.
   listed in `TOUCHPOINTS.md`.
 
 ### F1a · Verify the nodejs.org release signature
-- **Status:** TODO — backlog, not on the Phase 1 critical path
+- **Status:** IN REVIEW — folded into the F1 PR
 - **Depends on:** F1
 - **Tier:** 0
-- **Scope:** F1 fetches `SHASUMS256.txt` over TLS and verifies the tarball
-  against it, but does not verify that file's GPG signature
-  (`SHASUMS256.txt.sig`) against the Node release keys. A mirror serving both a
-  bad checksum file and a matching bad tarball would pass. This matters more
-  than it looks because `NODE_DIST_MIRROR` is overridable.
-- **Files:** `bin/v-add-sys-nodejs`, `func/node.sh`
-- **Acceptance:** a tarball whose `SHASUMS256.txt` carries an invalid or absent
-  signature is refused.
-- **Why not now:** TLS plus checksum is a reasonable bar, and Phase 1 is about
-  getting the sites off Cloudflare Workers. Raising it is worth doing before the
-  panel is exposed to customers who are not you.
+- **Scope:** Checksum-alone was not enough. `SHASUMS256.txt` is now verified
+  against the Node.js release keys before any checksum from it is trusted.
+  The keys are bundled at `install/common/nodejs/release-keys.asc`, and
+  `gpgv` reads that fixed keyring so verification cannot be influenced by, or
+  write to, any keyring on the host. `NODE_RELEASE_KEYRING` is overridable so an
+  administrator can supply a refreshed keyring when Node adds a release signer
+  without waiting for a package update.
+- **Files:** `install/common/nodejs/release-keys.asc` (new), `func/node.sh`,
+  `bin/v-add-sys-nodejs`, `test/nodejs.bats`, `src/deb/hestia/control` (gpgv)
+- **Acceptance:** a release whose `SHASUMS256.txt` carries an invalid, absent or
+  untrusted signature is refused. ✅ verified, including the case that matters:
+  a mirror serving a correct checksum and a *valid* signature made by a
+  non-Node key is rejected. The pre-fix code installed that mirror's payload as
+  `node` and made it the default runtime.
+- **Known limitation:** the bundled keyring is a point-in-time snapshot of
+  Node's release team. A release signed by a newly added member will fail until
+  the keyring is refreshed. The error names the cause, and the override exists
+  for exactly this.
 
 ---
 
